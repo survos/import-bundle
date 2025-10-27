@@ -23,8 +23,8 @@ use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 final class ImportEntitiesCommand
 {
     public function __construct(
-        private EntityManagerInterface $em,
         private LooseObjectMapper $mapper,
+        private ?EntityManagerInterface $em=null,
         private string $dataDir, // injected from $config
     ) {}
 
@@ -45,6 +45,10 @@ final class ImportEntitiesCommand
         #[Option(description: 'Verbose per-batch progress')]
         bool $progress = true,
     ): int {
+        if (!$this->em) {
+            $io->error("composer req doctrine/orm");
+            return Command::FAILURE;
+        }
 
         if (!$entityClass) {
             $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
