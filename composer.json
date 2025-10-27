@@ -1,0 +1,35 @@
+{
+    "name": "survos/import-bundle",
+    "description": "Command lines tool for quickly importing data into doctrine when the fields loosly match",
+    "keywords": [
+        "symfony-ux",
+        "symfony"
+    ],
+    "license": "MIT",
+    "type": "symfony-bundle",
+    "require": {
+        "php": "^8.4",
+        "symfony/config": "^7.3",
+        "symfony/dependency-injection": "^7.3",
+        "symfony/http-kernel": "^7.3",
+        "twig/twig": "^3.4",
+        "symfony/console": "^7.3",
+        "symfony/property-access": "^7.3",
+        "doctrine/orm": "^3.5",
+        "symfony/serializer": "^7.3"
+    },
+    "require-dev": {
+        "symfony/browser-kit": "^7.3",
+        "symfony/framework-bundle": "^7.3",
+        "symfony/phpunit-bridge": "^7.3",
+        "symfony/twig-bundle": "^7.3",
+        "symfony/var-dumper": "^7.3",
+        "league/csv": "^9.27",
+        "halaxa/json-machine": "^1.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Survos\\ImportBundle\\": "src/"
+        }
+    }
+}
