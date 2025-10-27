@@ -9,28 +9,29 @@ use Doctrine\Persistence\Mapping\MappingException;
 use League\Csv\Reader as CsvReader;
 use JsonMachine\Items;
 use Survos\JsonlBundle\Reader\JsonlReader as SurvosJsonlReader;
-use Survos\CoreBundle\Service\LooseObjectMapper;
+use Survos\ImportBundle\Service\LooseObjectMapper;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 
-#[AsCommand('code:import', 'Import records from a CSV/TSV/JSON/JSONL into a Doctrine entity')]
+#[AsCommand('import:entities', 'Import records from a CSV/TSV/JSON/JSONL into a Doctrine entity')]
 final class ImportEntitiesCommand
 {
     public function __construct(
         private EntityManagerInterface $em,
-        private ?LooseObjectMapper $mapper=null,
-        private ?PropertyAccessorInterface $propertyAccessor=null,
+        private LooseObjectMapper $mapper,
+        private string $dataDir, // injected from $config
     ) {}
 
     public function __invoke(
         SymfonyStyle $io,
         #[Argument('entity FQCN, e.g. App\\Entity\\Movie')]
-        string $entityClass,
+        ?string $entityClass=null,
         #[Option(description: 'Path to CSV/TSV/JSON/JSONL file')]
         ?string $file=null,
         #[Option(description: 'Primary key field (defaults to entity identifier or heuristics)')]
@@ -44,13 +45,22 @@ final class ImportEntitiesCommand
         #[Option(description: 'Verbose per-batch progress')]
         bool $progress = true,
     ): int {
+
+        if (!$entityClass) {
+            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
+        }
+        if (!class_exists($entityClass)) {
+            $entityClass = 'App\\Entity\\' . $entityClass;
+        }
+
         if (!class_exists($entityClass)) {
             $io->error("Entity class not found: $entityClass");
             return Command::FAILURE;
         }
 
         if (!$file) {
-            $file = $io->ask("What file would you like to import");
+            $files = glob($this->dataDir . '/*');
+            $file = $io->askQuestion(new ChoiceQuestion("What file would you like to import", $files));
         }
         if (!file_exists($file)) {
             $io->error("File not found: $file");
@@ -175,6 +185,16 @@ final class ImportEntitiesCommand
         return null;
     }
 
+    private function getAllEntityClasses(): array
+    {
+        $metadata = $this->em->getMetadataFactory()->getAllMetadata();
+
+        return array_map(
+            fn($meta) => $meta->getName(),
+            $metadata
+        );
+    }
+
     /** @return \Generator<array<string,mixed>> */
     private function iterateFile(string $path): \Generator
     {
@@ -185,7 +205,7 @@ final class ImportEntitiesCommand
             $sample = file_get_contents($path, false, null, 0, 8192) ?: '';
             $delimiter = str_contains($sample, "\t") ? "\t" : ',';
 
-            $csv = CsvReader::createFromPath($path, 'r');
+            $csv = CsvReader::from($path, 'r');
             $csv->setHeaderOffset(0);
             $csv->setDelimiter($delimiter);
             $csv->setEnclosure('"');

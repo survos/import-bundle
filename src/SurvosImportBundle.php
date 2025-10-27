@@ -18,6 +18,7 @@ class SurvosImportBundle extends AbstractBundle
             $builder->autowire(ImportEntitiesCommand::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true)
+                ->setArgument('$dataDir', $config['dir'])
                 ->addTag('console.command');
             // @todo: inject each service properly
 

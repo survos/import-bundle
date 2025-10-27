@@ -4,40 +4,36 @@ declare(strict_types=1);
 namespace Survos\ImportBundle\Service;
 
 use DateTimeImmutable;
+use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Bridge\Doctrine\PropertyInfo\DoctrineExtractor;
 use Symfony\Component\PropertyAccess\PropertyAccess;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
-use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractor;
-use Symfony\Component\PropertyInfo\PropertyInfoExtractorInterface;
-use Symfony\Component\TypeInfo\Type;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\String\UnicodeString;
+use Symfony\Component\TypeInfo\Type;
+use Symfony\Component\TypeInfo\TypeIdentifier;
 
 /**
- * Best-effort array/stdClass → object mapper.
+ * Best-effort array/stdClass → object mapper (Symfony 7.3 / PHP 8.4).
  *
- * KEY IDEAS
- * - We translate incoming keys using CamelCaseToSnakeCaseNameConverter *in reverse*,
- *   then set via PropertyAccessor. This fixes snake_case → camelCase for multi-word props.
- * - We consult PropertyInfo to decide when to coerce strings ("a|b|c") → array.
- * - Unknown fields are skipped; PKs (or any ignored) are never written.
+ * - Keys are normalized to snake_case, then denormalized back to camelCase via NameConverter.
+ * - Types resolved via DoctrineExtractor::getType() (TypeInfo) for smart coercions.
+ * - Unknown/unwritable fields are skipped; ignored fields (e.g. PK) are never written.
  */
 final class LooseObjectMapper
 {
+    private DoctrineExtractor $doctrineExtractor;
 
     public function __construct(
+        private EntityManagerInterface $entityManager,
         private ?PropertyAccessorInterface $pa = null,
-        private ?PropertyInfoExtractorInterface $pi = null,
-        private ?CamelCaseToSnakeCaseNameConverter $nc = null
+        private ?CamelCaseToSnakeCaseNameConverter $nc = null,
     ) {
         $this->pa = $pa ?? PropertyAccess::createPropertyAccessorBuilder()
             ->enableExceptionOnInvalidIndex()
             ->getPropertyAccessor();
 
-        $this->pi = $pi ?? new PropertyInfoExtractor(
-            typeExtractors: [new ReflectionExtractor()],
-        );
-
+        $this->doctrineExtractor = new DoctrineExtractor($this->entityManager);
         $this->nc = $nc ?? new CamelCaseToSnakeCaseNameConverter();
     }
 
@@ -72,21 +68,17 @@ final class LooseObjectMapper
 
         foreach ($arr as $snakeKey => $value) {
             // Convert incoming key to the object's property name.
-            // NameConverter::denormalize transforms snake_case → camelCase.
             $prop = $this->nc->denormalize((string) $snakeKey);
 
             if (in_array($prop, $ignored, true)) {
                 continue;
             }
-
-            // If the property isn't writable, skip.
             if (!$this->pa->isWritable($object, $prop)) {
                 continue;
             }
 
-            // Inspect destination type for smart coercions
-            $types = $this->pi->getTypes($object::class, $prop) ?? [];
-            $type  = $types[0] ?? null;
+            // Resolve destination type via new TypeInfo-aware API.
+            $type = $this->doctrineExtractor->getType($object::class, $prop);
 
             if ($type instanceof Type) {
                 $value = $this->coerceValueForType(
@@ -120,70 +112,58 @@ final class LooseObjectMapper
         bool $coerceScalars,
         bool $coerceDates
     ): mixed {
-        // Handle null / empty strings uniformly
         if ($value === '' || $value === null) {
             return null;
         }
 
-        $builtin = $type->getBuiltinType();
-
-        // If destination expects an array and we have a string, split it.
-        if ($builtin === Type::BUILTIN_TYPE_ARRAY && is_string($value)) {
+        // Arrays: split delimited strings.
+        if ($type->isIdentifiedBy(TypeIdentifier::ARRAY) && is_string($value)) {
             $delim = $perFieldDelimiter[$field]
                 ?? (str_contains($value, '|') ? '|' : (str_contains($value, ',') ? ',' : '|'));
 
             $parts = array_map('trim', explode($delim, $value));
-            $parts = array_values(array_filter($parts, static fn($s) => $s !== ''));
-            return $parts;
+            return array_values(array_filter($parts, static fn($s) => $s !== ''));
         }
 
-        // Scalars: attempt gentle coercion if requested
         if ($coerceScalars && is_string($value)) {
             $v = trim($value);
 
-            switch ($builtin) {
-                case Type::BUILTIN_TYPE_INT:
-                    if (preg_match('/^-?\d+$/', $v)) {
-                        // avoid converting zero-padded codes unexpectedly: only coerce if it looks numeric AND
-                        // the field name suggests numeric or there are no leading zeros
-                        $hasLeadingZero = strlen($v) > 1 && $v[0] === '0';
-                        if (!$hasLeadingZero || $this->looksNumericField($field)) {
-                            return (int) $v;
-                        }
+            // ints
+            if ($type->isIdentifiedBy(TypeIdentifier::INT)) {
+                if (preg_match('/^-?\d+$/', $v)) {
+                    $hasLeadingZero = strlen($v) > 1 && $v[0] === '0';
+                    if (!$hasLeadingZero || $this->looksNumericField($field)) {
+                        return (int) $v;
                     }
-                    break;
+                }
+            }
 
-                case Type::BUILTIN_TYPE_FLOAT:
-                    if (is_numeric($v)) {
-                        return (float) $v;
-                    }
-                    break;
+            // floats
+            if ($type->isIdentifiedBy(TypeIdentifier::FLOAT) && is_numeric($v)) {
+                return (float) $v;
+            }
 
-                case Type::BUILTIN_TYPE_BOOL:
-                    $low = strtolower($v);
-                    if (in_array($low, ['true','false','yes','no','y','n','on','off','1','0'], true)) {
-                        return in_array($low, ['true','yes','y','on','1'], true);
-                    }
-                    break;
+            // bools
+            if ($type->isIdentifiedBy(TypeIdentifier::BOOL)) {
+                $low = strtolower($v);
+                if (in_array($low, ['true','false','yes','no','y','n','on','off','1','0'], true)) {
+                    return in_array($low, ['true','yes','y','on','1'], true);
+                }
+            }
 
-                case Type::BUILTIN_TYPE_OBJECT:
-                    // Dates: ISO or common US m/d/yy[yy]
-                    if ($coerceDates) {
-                        // ISO 8601
-                        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $v)) {
-                            try { return new DateTimeImmutable($v); } catch (\Throwable) {}
-                        }
-                        // m/d/yy or m/d/yyyy
-                        if (preg_match('#^\d{1,2}/\d{1,2}/\d{2,4}$#', $v)) {
-                            // Normalize 2-digit year to 20xx heuristic (adjust if you need 19xx)
-                            $parts = explode('/', $v);
-                            [$m,$d,$y] = array_map('intval', $parts);
-                            if ($y < 100) { $y += ($y >= 70 ? 1900 : 2000); }
-                            $iso = sprintf('%04d-%02d-%02dT00:00:00Z', $y, $m, $d);
-                            try { return new DateTimeImmutable($iso); } catch (\Throwable) {}
-                        }
-                    }
-                    break;
+            // dates (only attempt when destination is object-ish)
+            if ($coerceDates && $type->isIdentifiedBy(TypeIdentifier::OBJECT)) {
+                // ISO 8601
+                if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $v)) {
+                    try { return new DateTimeImmutable($v); } catch (\Throwable) {}
+                }
+                // m/d/yy or m/d/yyyy
+                if (preg_match('#^\d{1,2}/\d{1,2}/\d{2,4}$#', $v)) {
+                    [$m,$d,$y] = array_map('intval', explode('/', $v));
+                    if ($y < 100) { $y += ($y >= 70 ? 1900 : 2000); }
+                    $iso = sprintf('%04d-%02d-%02dT00:00:00Z', $y, $m, $d);
+                    try { return new DateTimeImmutable($iso); } catch (\Throwable) {}
+                }
             }
         }
 
@@ -215,8 +195,6 @@ final class LooseObjectMapper
         }
         return $out;
     }
-
-    // add inside the class
 
     /** Convert field name to snake_case (id => id, accessionNumber => accession_number). */
     public function toSnake(string $name): string
@@ -271,19 +249,16 @@ final class LooseObjectMapper
      */
     public function resolveRowKey(array $row, string $field): ?string
     {
-        // fast path: exact and snake/camel variants
         foreach ($this->keyCandidates($field) as $cand) {
             if (array_key_exists($cand, $row)) {
                 return $cand;
             }
         }
 
-        // fallback case-insensitive scan once
         $lowerMap = array_change_key_case($row, CASE_LOWER);
         foreach ($this->keyCandidates($field) as $cand) {
             $lc = strtolower($cand);
             if (array_key_exists($lc, $lowerMap)) {
-                // recover original key (preserve original casing)
                 foreach ($row as $orig => $_) {
                     if (strtolower($orig) === $lc) {
                         return $orig;
@@ -294,5 +269,4 @@ final class LooseObjectMapper
 
         return null;
     }
-
 }
