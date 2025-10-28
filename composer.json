@@ -12,18 +12,29 @@
         "symfony/config": "^7.3",
         "symfony/dependency-injection": "^7.3",
         "symfony/http-kernel": "^7.3",
-        "twig/twig": "^3.4"
+        "twig/twig": "^3.4",
+        "symfony/type-info": "^7.3"
     },
     "require-dev": {
         "symfony/browser-kit": "^7.3",
         "symfony/framework-bundle": "^7.3",
         "symfony/phpunit-bridge": "^7.3",
         "symfony/twig-bundle": "^7.3",
-        "symfony/var-dumper": "^7.3"
+        "symfony/var-dumper": "^7.3",
+        "phpunit/phpunit": "^12.4",
+        "doctrine/doctrine-bundle": "^3.0",
+        "doctrine/orm": "^3.5",
+        "symfony/serializer": "^7.3",
+        "symfony/property-access": "^7.3"
     },
     "autoload": {
         "psr-4": {
             "Survos\\ImportBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Survos\\ImportBundle\\Tests\\": "tests/"
         }
     }
 }
