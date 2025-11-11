@@ -24,8 +24,8 @@ final class ImportEntitiesCommand
 {
     public function __construct(
         private LooseObjectMapper $mapper,
-        private ?EntityManagerInterface $em=null,
         private string $dataDir, // injected from $config
+        private ?EntityManagerInterface $em=null,
     ) {}
 
     public function __invoke(
