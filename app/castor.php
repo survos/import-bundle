@@ -10,32 +10,40 @@ use function Castor\{io, run, fs, variable};
 function setup(): void
 {
     io()->title('Installing required bundles');
-    run('composer req survos/import-bundle easycorp/easyadmin-bundle:4.x-dev');
-}
-
-#[AsTask('database', description: 'Configure and initialize database')]
-function database(): void
-{
-    io()->title('Configuring database');
-
     if (!fs()->exists('.env.local')) {
         $dbUrl = 'DATABASE_URL="sqlite:///%kernel.project_dir%/var/data.db"';
+
         fs()->appendToFile('.env.local', $dbUrl . PHP_EOL);
         io()->success('Created .env.local with SQLite configuration');
     } else {
         io()->note('.env.local already exists');
     }
 
-    io()->title('Creating database schema');
-    run('bin/console doctrine:schema:update --force --dump-sql');
+    run('composer config extra.symfony.allow-contrib true');
+    run('composer req survos/import-bundle easycorp/easyadmin-bundle:4.x-dev');
 }
 
-
-#[AsTask('import', description: 'Import demo data')]
-function import(): void
+#[AsTask('fetch-data', description: 'Fetch the data and unzip it')]
+function fetch(): void
 {
     io()->title('Importing product data');
-    run('bin/console app:import-products'); // Match your actual command name
+    run('mkdir -p data');
+    run('curl -L -o data/movies.csv.gz https://github.com/metarank/msrd/raw/master/dataset/movies.csv.gz');
+    run('gunzip data/movies.csv.gz');
+}
+
+#[AsTask('make-entity', description: 'Create the entity from the csv')]
+function make_entity(): void
+{
+    run('bin/console code:entity Movie --file=data/movies.csv');
+    run('bin/console d:sc:update --force');
+}
+
+#[AsTask('import', description: 'Fetch the data and unzip it')]
+function import_data(): void
+{
+    io()->title('Importing product data');
+    run('bin/console import:entities Movie --file data/movies.csv --limit 500');
 }
 
 #[AsTask('open', description: 'Start web server and open in browser')]
@@ -52,35 +60,11 @@ function build(): void
     io()->section('Building complete demo application');
 
     setup();
-    database();
-    import();
+    make_entity();
+    fetch();
+    import_data();
     open();
 
     io()->success('Demo application built successfully!');
     io()->note('Visit the opened browser to see the demo');
-}
-
-#[AsTask('clean', description: 'Remove generated files and reset')]
-function clean(): void
-{
-    if (!io()->confirm('This will remove generated files. Continue?', false)) {
-        return;
-    }
-
-    io()->title('Cleaning up demo files');
-
-    $filesToRemove = [
-        'src/Entity/Product.php',
-        'src/Repository/ProductRepository.php',
-        'src/Command/ImportProductsCommand.php',
-        'templates/products.html.twig',
-        'var/data.db',
-    ];
-
-    foreach ($filesToRemove as $file) {
-        if (fs()->exists($file)) {
-            fs()->remove($file);
-            io()->success("Removed {$file}");
-        }
-    }
 }

@@ -57,11 +57,27 @@ bin/console make:admin:crud App\\Entity\\Movie -n
 
 For reasons I don't quite understand, clearing the cache doesn't work if it's included above, so run it separately before opening the page
 
-````bash
+```bash
 bin/console cache:clear
 bin/console cache:pool:clear cache.app
 symfony open:local --path=/admin/movie
 ```
 
+## Castor
+
+Instead of the bash script, you can run this as a castor command, after installing castor
+
+```bash
+curl "https://castor.jolicode.com/install" | bash
+```
+
+Now create a project, download the castor file and build using it.
+
+```
+symfony new import-demo --webapp && cd import-demo 
+curl -L https://raw.githubusercontent.com/survos/mono/main/bu/import-bundle/app/castor.php?token=GHSAT0AAAAAACSNSA5FZUYOHRVPHYTDH7WU2IUYI6A -o castor.php
+curl -L https://github.com/survos/import-bundle/raw/master/app/castor.php -o castor.php
+castor build
+```
 
 
