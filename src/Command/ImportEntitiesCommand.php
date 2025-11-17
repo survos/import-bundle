@@ -102,8 +102,11 @@ final class ImportEntitiesCommand
 //                        dump($row);
                         continue;
                     }
+                } else {
+                    dd($pkField, $row, $entityClass);
                 }
             }
+            assert($pkField, "No pk field found.");
 
             if ($pkValue) {
                 if (!$entity = $this->em->getRepository($entityClass)->find($pkValue)) {
@@ -111,6 +114,7 @@ final class ImportEntitiesCommand
                     $entity->$pkField = $pkValue;
                     $this->em->persist($entity);
                 }
+            } else {
             }
 //            dd($entity, $pkValue, $pkField);
 //
