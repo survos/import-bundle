@@ -313,7 +313,8 @@ final class ImportEntitiesCommand
         // booleans
         $l = strtolower($v);
         if (in_array($l, ['true','false','yes','no','y','n','on','off','1','0'], true)) {
-            return in_array($l, ['true','yes','y','on','1'], true);
+//            return in_array($l, ['true','yes','y','on','1'], true);
+            return in_array($l, ['true','yes','y','on'], true);
         }
 
         // ISO 8601 datetime
