@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
@@ -18,22 +19,22 @@ use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
-
 #[AsCommand('import:entities', 'Import records from a CSV/TSV/JSON/JSONL into a Doctrine entity')]
 final class ImportEntitiesCommand
 {
     public function __construct(
         private LooseObjectMapper $mapper,
         private string $dataDir, // injected from $config
-        private ?EntityManagerInterface $em=null,
-    ) {}
+        private ?EntityManagerInterface $em = null,
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
         #[Argument('entity FQCN, e.g. App\\Entity\\Movie')]
-        ?string $entityClass=null,
+        ?string $entityClass = null,
         #[Option(description: 'Path to CSV/TSV/JSON/JSONL file')]
-        ?string $file=null,
+        ?string $file = null,
         #[Option(description: 'Primary key field (defaults to entity identifier or heuristics)')]
         ?string $pk = null,
         #[Option(description: 'Limit number of records to import')]
@@ -44,6 +45,8 @@ final class ImportEntitiesCommand
         bool $reset = false,
         #[Option(description: 'Verbose per-batch progress')]
         bool $progress = true,
+        #[Option(description: 'no id, use auto-increment', name: 'auto')]
+        bool $idIsLineNumber = false,
     ): int {
         if (!$this->em) {
             $io->error("composer req doctrine/orm");
@@ -72,12 +75,14 @@ final class ImportEntitiesCommand
         }
 
         // Resolve PK field: prefer Doctrine metadata, else user-provided, else heuristic
-        $pkField = $pk ?? $this->resolvePrimaryKey($entityClass);
-        if (!$pkField) {
-            $io->warning('No obvious primary key found; proceeding without upsert (always insert).');
-            return Command::FAILURE;
-        } else {
-            $io->writeln("Using primary key: <info>$pkField</info>");
+        if (!$idIsLineNumber) {
+            $pkField = $pk ?? $this->resolvePrimaryKey($entityClass);
+            if (!$pkField) {
+                $io->warning('No obvious primary key found; proceeding without upsert (always insert).');
+                return Command::FAILURE;
+            } else {
+                $io->writeln("Using primary key: <info>$pkField</info>");
+            }
         }
 
         if ($reset) {
@@ -87,13 +92,15 @@ final class ImportEntitiesCommand
         }
 
         $i = 0;
-        foreach ($this->iterateFile($file) as $row) {
+        foreach ($this->iterateFile($file) as $idx => $row) {
             // coerce each value smartly
             foreach ($row as $k => $v) {
                 $row[$k] = $this->coerceValue($k, $v);
             }
 
-            if ($pkField) {
+            if ($idIsLineNumber) {
+                $pkValue = $idx;
+            } elseif ($pkField) {
                 if ($rowKey = $this->mapper->resolveRowKey($row, $pkField)) {
                     $pkValue = $row[$rowKey];
 //                    dump($rowKey);
@@ -105,17 +112,19 @@ final class ImportEntitiesCommand
                 } else {
                     dd($pkField, $row, $entityClass);
                 }
+                assert($pkField, "No pk field found.");
+                assert($pkValue, "No pk value found for " . $pkField);
             }
-            assert($pkField, "No pk field found.");
 
-            if ($pkValue) {
-                if (!$entity = $this->em->getRepository($entityClass)->find($pkValue)) {
-                    $entity = new $entityClass();
+//            if ($pkValue) {
+            if (!$entity = $this->em->getRepository($entityClass)->find($pkValue)) {
+                $entity = new $entityClass();
+                if (!$idIsLineNumber) {
                     $entity->$pkField = $pkValue;
-                    $this->em->persist($entity);
                 }
-            } else {
+                $this->em->persist($entity);
             }
+//            }
 //            dd($entity, $pkValue, $pkField);
 //
 //            if (!$entity) {
@@ -143,12 +152,14 @@ final class ImportEntitiesCommand
 //            }
 
             // Map remaining data into entity; ignore PK
-            $ignore = $pkField ? [$pkField] : [];
+            $ignore = $pkField??false ? [$pkField] : [];
             $this->mapper->mapInto($row, $entity, ignored: $ignore);
 
             $i++;
             if ($batch > 0 && ($i % $batch) === 0) {
-                if ($progress) { $io->writeln("... $i"); }
+                if ($progress) {
+                    $io->writeln("... $i");
+                }
                 $this->em->flush();
                 $this->em->clear();
             }
@@ -248,7 +259,9 @@ final class ImportEntitiesCommand
             try {
                 while (($line = fgets($fh)) !== false) {
                     $line = trim($line);
-                    if ($line === '') { continue; }
+                    if ($line === '') {
+                        continue;
+                    }
                     $row = json_decode($line, true);
                     if (is_array($row)) {
                         yield $row;
@@ -280,7 +293,9 @@ final class ImportEntitiesCommand
         // plural fields with comma or pipe => array
         $looksPlural = static function (string $name): bool {
             $n = strtolower($name);
-            if (\in_array($n, ['is','has','was','ids','status'], true)) { return false; }
+            if (\in_array($n, ['is','has','was','ids','status'], true)) {
+                return false;
+            }
             return str_ends_with($n, 's');
         };
         if ($looksPlural($field) && (str_contains($v, ',') || str_contains($v, '|'))) {
@@ -303,7 +318,10 @@ final class ImportEntitiesCommand
 
         // ISO 8601 datetime
         if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $v) === 1) {
-            try { return new DateTimeImmutable($v); } catch (\Throwable) {}
+            try {
+                return new DateTimeImmutable($v);
+            } catch (\Throwable) {
+            }
         }
 
         // integers (avoid zero-padded codes unless “numeric preferred”)
@@ -326,4 +344,3 @@ final class ImportEntitiesCommand
         return $v;
     }
 }
-
