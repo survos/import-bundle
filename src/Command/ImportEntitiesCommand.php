@@ -33,7 +33,7 @@ final class ImportEntitiesCommand
         SymfonyStyle $io,
         #[Argument('entity FQCN, e.g. App\\Entity\\Movie')]
         ?string $entityClass = null,
-        #[Option(description: 'Path to CSV/TSV/JSON/JSONL file')]
+        #[Argument('Path to CSV/TSV/JSON/JSONL file')]
         ?string $file = null,
         #[Option(description: 'Primary key field (defaults to entity identifier or heuristics)')]
         ?string $pk = null,
@@ -102,7 +102,17 @@ final class ImportEntitiesCommand
                 $pkValue = $idx;
             } elseif ($pkField) {
                 if ($rowKey = $this->mapper->resolveRowKey($row, $pkField)) {
-                    $pkValue = $row[$rowKey];
+
+                    $pkValue = $row[$pkField] ?? null;
+
+                    $rp = new \ReflectionProperty($entityClass, $pkField);
+                    $type = $rp->getType();
+                    if ($type instanceof \ReflectionNamedType && $type->getName() === 'string') {
+                        $pkValue = $pkValue !== null ? (string) $pkValue : null;
+                    }
+
+// then assign to the entity
+
 //                    dump($rowKey);
                     if (empty($pkValue)) {
                         $io->warning("Skipping row $rowKey, no primary key found.");
@@ -110,7 +120,7 @@ final class ImportEntitiesCommand
                         continue;
                     }
                 } else {
-                    dd($pkField, $row, $entityClass);
+                    dd(array_keys($row), $pkField, $entityClass);
                 }
                 assert($pkField, "No pk field found.");
                 assert($pkValue, "No pk value found for " . $pkField);
@@ -120,7 +130,13 @@ final class ImportEntitiesCommand
             if (!$entity = $this->em->getRepository($entityClass)->find($pkValue)) {
                 $entity = new $entityClass();
                 if (!$idIsLineNumber) {
-                    $entity->$pkField = $pkValue;
+                    try {
+                        $entity->$pkField = $pkValue;
+                    } catch (\Exception $e) {
+                        $io->error($e->getMessage());
+                        dd($pkField, $pkValue);
+
+                    }
                 }
                 $this->em->persist($entity);
             }
