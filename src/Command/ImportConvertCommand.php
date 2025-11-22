@@ -53,7 +53,7 @@ final class ImportConvertCommand
     ): int {
         $io->title('Import / Convert');
         if (!\is_file($input)) {
-            $io->error(sprintf('Input file "%s" does not exist.', $input));
+            $io->error(\sprintf('Input file "%s" does not exist.', $input));
             return Command::FAILURE;
         }
 
@@ -68,6 +68,7 @@ final class ImportConvertCommand
         $profilePath = $this->defaultProfilePath($jsonlPath);
 
         $baseTags = [];
+        $dataset ??= $baseName;
         if ($dataset !== null) {
             $baseTags[] = $dataset;
         }
@@ -96,25 +97,26 @@ final class ImportConvertCommand
             $io->note('Input already in JSONL format; no conversion needed.');
             $jsonlPath = $sourceInput;
         } elseif ($sourceExt === 'csv') {
-            $io->section(sprintf('Converting CSV to JSONL (from %s)', $sourceInput));
+            $io->section(\sprintf('Converting CSV to JSONL (from %s)', $sourceInput));
             $recordCount = $this->convertCsvToJsonl($sourceInput, $jsonlPath, $limit, $io, $input, $dataset);
-            $io->success(sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
         } elseif ($sourceExt === 'json') {
-            $io->section(sprintf('Converting JSON array to JSONL (from %s)', $sourceInput));
+            $io->section(\sprintf('Converting JSON array to JSONL (from %s)', $sourceInput));
             $recordCount = $this->convertJsonArrayToJsonl($sourceInput, $jsonlPath, $limit, $rootKey, $io, $input, $dataset);
-            $io->success(sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
         } elseif ($sourceExt === 'json_dir') {
-            $io->section(sprintf('Converting JSON records directory to JSONL (from %s)', $sourceInput));
+            $io->section(\sprintf('Converting JSON records directory to JSONL (from %s)', $sourceInput));
             $recordCount = $this->convertJsonRecordsDirToJsonl($sourceInput, $jsonlPath, $limit, $io, $input, $dataset);
-            $io->success(sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
         } else {
-            $io->error(sprintf('Unsupported input extension ".%s". Use CSV, JSON, or JSONL.', $sourceExt));
+            $io->error(\sprintf('Unsupported input extension ".%s". Use CSV, JSON, or JSONL.', $sourceExt));
             return Command::FAILURE;
         }
 
         $io->section('Profiling JSONL');
-        [$fieldsProfile, $recordCount] = $this->buildProfile($jsonlPath, $limit);
+        [$fieldsProfile, $recordCount, $uniqueFields, $samples] = $this->buildProfile($jsonlPath, $limit);
 
+        // Inject original header name if we know it
         foreach ($fieldsProfile as $name => &$stats) {
             if (isset($this->fieldOriginalNames[$name])) {
                 $stats['originalName'] = $this->fieldOriginalNames[$name];
@@ -123,23 +125,12 @@ final class ImportConvertCommand
         unset($stats);
 
         $tags         = $baseTags;
-        $io->section('Profiling JSONL');
-        [$fieldsProfile, $recordCount, $uniqueFields] = $this->buildProfile($jsonlPath, $limit);
-
-        foreach ($fieldsProfile as $name => &$stats) {
-            if (isset($this->fieldOriginalNames[$name])) {
-                $stats['originalName'] = $this->fieldOriginalNames[$name];
-            }
-        }
-        unset($stats);
-
-        $tags         = $baseTags;
-        $uniqueFields = \array_values($uniqueFields); // ensure clean indexing
+        $uniqueFields = \array_values($uniqueFields); // ensure contiguous indexes
 
         if ($uniqueFields) {
             $io->note('PK-like unique fields: ' . \implode(', ', $uniqueFields));
         } else {
-            $io->warning('No PK-like unique field detected (non-null, no spaces/special chars, no duplicates).');
+            $io->warning('No PK-like unique field detected (non-null, allowed chars, no duplicates).');
             $io->writeln('  → You may need to fix the profile logic or provide a separate id field.');
         }
 
@@ -151,23 +142,7 @@ final class ImportConvertCommand
             'dataset'      => $dataset,
             'uniqueFields' => $uniqueFields,
             'fields'       => $fieldsProfile,
-        ];
-
-        if ($uniqueFields) {
-            $io->note('Unique fields (candidates for PK): ' . \implode(', ', $uniqueFields));
-        } else {
-            $io->warning('No fully unique field detected from profile (either not unique, or distinctCap reached).');
-            $io->writeln('  → Consider adding a listener to drop/fix bad/duplicate rows (e.g. Marvel).');
-        }
-
-        $fullProfile = [
-            'input'        => $input,
-            'output'       => $jsonlPath,
-            'recordCount'  => $recordCount,
-            'tags'         => $tags,
-            'dataset'      => $dataset,
-            'uniqueFields' => $uniqueFields,
-            'fields'       => $fieldsProfile,
+            'samples'      => $samples, // top/bottom samples for debugging
         ];
 
         $this->ensureDir($profilePath);
@@ -175,7 +150,7 @@ final class ImportConvertCommand
             $profilePath,
             \json_encode($fullProfile, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES)
         );
-        $io->success(sprintf('Profile written to %s', $profilePath));
+        $io->success(\sprintf('Profile written to %s', $profilePath));
 
         if ($this->dispatcher) {
             $this->dispatcher->dispatch(
@@ -211,11 +186,11 @@ final class ImportConvertCommand
         return \sprintf('%s/%s.profile.json', $dir, $base);
     }
 
-    private function e(string $filePath): void
+    private function ensureDir(string $filePath): void
     {
         $dir = \dirname($filePath);
         if ($dir !== '' && !\is_dir($dir)) {
-            \mkdir($dir, 0777, true);
+            \mkdir($dir, 0o777, true);
         }
     }
 
@@ -251,14 +226,14 @@ final class ImportConvertCommand
 
     private function unpackZipInput(string $zipPath, ?string $filterPath, SymfonyStyle $io): array
     {
-        $io->note(sprintf('ZIP input detected: %s', $zipPath));
+        $io->note(\sprintf('ZIP input detected: %s', $zipPath));
         $zip = new \ZipArchive();
         if ($zip->open($zipPath) !== true) {
-            throw new \RuntimeException(sprintf('Unable to open ZIP file "%s".', $zipPath));
+            throw new \RuntimeException(\sprintf('Unable to open ZIP file "%s".', $zipPath));
         }
 
         if ($filterPath) {
-            $io->note(sprintf('Using --zip-path filter: "%s"', $filterPath));
+            $io->note(\sprintf('Using --zip-path filter: "%s"', $filterPath));
             $normalizedFilter = \rtrim($filterPath, '/');
             $index = $zip->locateName($normalizedFilter, \ZipArchive::FL_NOCASE);
             if ($index === false) {
@@ -268,13 +243,13 @@ final class ImportConvertCommand
                 $name = $zip->getNameIndex($index);
                 if ($name === false) {
                     $zip->close();
-                    throw new \RuntimeException(sprintf('Could not read entry at index %d in ZIP "%s".', $index, $zipPath));
+                    throw new \RuntimeException(\sprintf('Could not read entry at index %d in ZIP "%s".', $index, $zipPath));
                 }
                 if (\str_ends_with($name, '/')) {
                     $dirName = $name;
-                    $io->note(sprintf('ZIP path "%s" is a directory; importing all JSON records under it.', $dirName));
+                    $io->note(\sprintf('ZIP path "%s" is a directory; importing all JSON records under it.', $dirName));
                     $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_dir_' . \uniqid('', true);
-                    \mkdir($tmpDir, 0777, true);
+                    \mkdir($tmpDir, 0o777, true);
                     $fileNames = [];
                     for ($i = 0; $i < $zip->numFiles; $i++) {
                         $n = $zip->getNameIndex($i);
@@ -292,7 +267,7 @@ final class ImportConvertCommand
                     }
                     if ($fileNames === []) {
                         $zip->close();
-                        throw new \RuntimeException(sprintf(
+                        throw new \RuntimeException(\sprintf(
                             'Directory "%s" inside ZIP "%s" does not contain any JSON/JSONL/CSV files.',
                             $dirName,
                             $zipPath
@@ -300,7 +275,7 @@ final class ImportConvertCommand
                     }
                     if (!$zip->extractTo($tmpDir, $fileNames)) {
                         $zip->close();
-                        throw new \RuntimeException(sprintf(
+                        throw new \RuntimeException(\sprintf(
                             'Failed to extract files from directory "%s" in ZIP "%s".',
                             $dirName,
                             $zipPath
@@ -313,10 +288,10 @@ final class ImportConvertCommand
 
                 $ext = \strtolower(\pathinfo($name, \PATHINFO_EXTENSION));
                 $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_' . \uniqid('', true);
-                \mkdir($tmpDir, 0777, true);
+                \mkdir($tmpDir, 0o777, true);
                 if (!$zip->extractTo($tmpDir, $name)) {
                     $zip->close();
-                    throw new \RuntimeException(sprintf(
+                    throw new \RuntimeException(\sprintf(
                         'Failed to extract "%s" from ZIP file "%s".',
                         $name,
                         $zipPath
@@ -324,12 +299,12 @@ final class ImportConvertCommand
                 }
                 $zip->close();
                 $extractedPath = $tmpDir . '/' . $name;
-                $io->note(sprintf('ZIP extracted via --zip-path: %s (.%s)', $extractedPath, $ext));
+                $io->note(\sprintf('ZIP extracted via --zip-path: %s (.%s)', $extractedPath, $ext));
                 return [$extractedPath, $ext];
             }
 
             $zip->close();
-            throw new \RuntimeException(sprintf(
+            throw new \RuntimeException(\sprintf(
                 'File or directory "%s" not found inside ZIP "%s".',
                 $filterPath,
                 $zipPath
@@ -356,18 +331,18 @@ final class ImportConvertCommand
 
         if ($candidateName === null || $candidateExt === null) {
             $zip->close();
-            throw new \RuntimeException(sprintf(
+            throw new \RuntimeException(\sprintf(
                 'ZIP file "%s" does not contain a CSV, JSON, or JSONL file.',
                 $zipPath
             ));
         }
 
-        $io->note(sprintf('Using "%s" from ZIP (.%s)', $candidateName, $candidateExt));
+        $io->note(\sprintf('Using "%s" from ZIP (.%s)', $candidateName, $candidateExt));
         $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_' . \uniqid('', true);
-        \mkdir($tmpDir, 0777, true);
+        \mkdir($tmpDir, 0o777, true);
         if (!$zip->extractTo($tmpDir, $candidateName)) {
             $zip->close();
-            throw new \RuntimeException(sprintf(
+            throw new \RuntimeException(\sprintf(
                 'Failed to extract "%s" from ZIP file "%s".',
                 $candidateName,
                 $zipPath
@@ -380,28 +355,28 @@ final class ImportConvertCommand
 
     private function unpackGzipInput(string $gzPath, SymfonyStyle $io): array
     {
-        $io->note(sprintf('GZIP input detected: %s', $gzPath));
+        $io->note(\sprintf('GZIP input detected: %s', $gzPath));
         $base     = \pathinfo($gzPath, \PATHINFO_FILENAME);
         $innerExt = \strtolower(\pathinfo($base, \PATHINFO_EXTENSION));
         if ($innerExt === '') {
-            throw new \RuntimeException(sprintf(
+            throw new \RuntimeException(\sprintf(
                 'Cannot infer underlying extension from GZIP file "%s". Expected something like ".csv.gz" or ".json.gz".',
                 $gzPath
             ));
         }
 
         $tmpDir  = \sys_get_temp_dir() . '/import_bundle_gz_' . \uniqid('', true);
-        \mkdir($tmpDir, 0777, true);
+        \mkdir($tmpDir, 0o777, true);
         $outPath = $tmpDir . '/' . $base;
 
         $gz = \gzopen($gzPath, 'rb');
         if ($gz === false) {
-            throw new \RuntimeException(sprintf('Unable to open GZIP file "%s".', $gzPath));
+            throw new \RuntimeException(\sprintf('Unable to open GZIP file "%s".', $gzPath));
         }
         $out = \fopen($outPath, 'wb');
         if ($out === false) {
             \gzclose($gz);
-            throw new \RuntimeException(sprintf('Unable to create temporary file "%s".', $outPath));
+            throw new \RuntimeException(\sprintf('Unable to create temporary file "%s".', $outPath));
         }
         while (!\gzeof($gz)) {
             $chunk = \gzread($gz, 8192);
@@ -413,7 +388,7 @@ final class ImportConvertCommand
         \gzclose($gz);
         \fclose($out);
 
-        $io->note(sprintf('GZIP decompressed to %s (.%s)', $outPath, $innerExt));
+        $io->note(\sprintf('GZIP decompressed to %s (.%s)', $outPath, $innerExt));
         return [$outPath, $innerExt];
     }
 
@@ -427,7 +402,7 @@ final class ImportConvertCommand
     ): int {
         $firstChunk = \file_get_contents($input, false, null, 0, 4096) ?: '';
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
-        $io->note(sprintf('Detected CSV delimiter: %s', $delimiter === "\t" ? '\\t (TAB)' : '"," (comma)'));
+        $io->note(\sprintf('Detected CSV delimiter: %s', $delimiter === "\t" ? '\\t (TAB)' : '"," (comma)'));
 
         $csv = CsvReader::createFromPath($input, 'r');
         $csv->setDelimiter($delimiter);
@@ -442,6 +417,7 @@ final class ImportConvertCommand
         }
 
         $this->resetJsonlOutput($output);
+        $this->ensureDir($output);
         $writer = JsonlWriter::open($output);
 
         $count  = 0;
@@ -490,7 +466,7 @@ final class ImportConvertCommand
     ): int {
         $contents = \file_get_contents($input);
         if ($contents === false) {
-            throw new \RuntimeException(sprintf('Unable to read JSON file "%s".', $input));
+            throw new \RuntimeException(\sprintf('Unable to read JSON file "%s".', $input));
         }
 
         $decoded = \json_decode($contents, true, 512, \JSON_THROW_ON_ERROR);
@@ -500,7 +476,7 @@ final class ImportConvertCommand
 
         if ($rootKey !== null) {
             if (!\array_key_exists($rootKey, $decoded)) {
-                throw new \RuntimeException(sprintf(
+                throw new \RuntimeException(\sprintf(
                     'Root key "%s" not found in JSON. Available keys: %s',
                     $rootKey,
                     \implode(', ', \array_keys($decoded))
@@ -508,9 +484,9 @@ final class ImportConvertCommand
             }
             $items = $decoded[$rootKey];
             if (!\is_array($items)) {
-                throw new \RuntimeException(sprintf('Value at root key "%s" is not an array.', $rootKey));
+                throw new \RuntimeException(\sprintf('Value at root key "%s" is not an array.', $rootKey));
             }
-            $io->note(sprintf('Using JSON root key "%s" with %d items (if fully loaded).', $rootKey, \count($items)));
+            $io->note(\sprintf('Using JSON root key "%s" with %d items (if fully loaded).', $rootKey, \count($items)));
         } else {
             $items = $decoded;
             if (!\is_array($items)) {
@@ -519,6 +495,7 @@ final class ImportConvertCommand
         }
 
         $this->resetJsonlOutput($output);
+        $this->ensureDir($output);
         $writer = JsonlWriter::open($output);
 
         $count  = 0;
@@ -559,10 +536,11 @@ final class ImportConvertCommand
         ?string $dataset,
     ): int {
         if (!\is_dir($dir)) {
-            throw new \RuntimeException(sprintf('Records directory "%s" does not exist.', $dir));
+            throw new \RuntimeException(\sprintf('Records directory "%s" does not exist.', $dir));
         }
 
         $this->resetJsonlOutput($output);
+        $this->ensureDir($output);
         $writer = JsonlWriter::open($output);
 
         $count = 0;
@@ -587,20 +565,20 @@ final class ImportConvertCommand
             if ($ext === 'json') {
                 $contents = \file_get_contents($path);
                 if ($contents === false) {
-                    $io->warning(sprintf('Unable to read JSON file "%s". Skipping.', $path));
+                    $io->warning(\sprintf('Unable to read JSON file "%s". Skipping.', $path));
                     continue;
                 }
 
                 $decoded = \json_decode($contents, true);
                 if (!\is_array($decoded)) {
-                    $io->warning(sprintf('JSON in "%s" is not an object/array. Skipping.', $path));
+                    $io->warning(\sprintf('JSON in "%s" is not an object/array. Skipping.', $path));
                     continue;
                 }
 
                 if (\array_is_list($decoded)) {
                     foreach ($decoded as $item) {
                         if (!\is_array($item)) {
-                            $io->warning(sprintf('Non-object item in array in "%s". Skipping item.', $path));
+                            $io->warning(\sprintf('Non-object item in array in "%s". Skipping item.', $path));
                             continue;
                         }
 
@@ -634,7 +612,7 @@ final class ImportConvertCommand
             } elseif ($ext === 'jsonl') {
                 $handle = \fopen($path, 'rb');
                 if ($handle === false) {
-                    $io->warning(sprintf('Unable to open JSONL file "%s". Skipping.', $path));
+                    $io->warning(\sprintf('Unable to open JSONL file "%s". Skipping.', $path));
                     continue;
                 }
                 while (($line = \fgets($handle)) !== false) {
@@ -800,31 +778,16 @@ final class ImportConvertCommand
         return $camel;
     }
 
-    private function detectUniqueFields(array $fieldsProfile, int $recordCount): array
-    {
-        if ($recordCount <= 0) {
-            return [];
-        }
-        $unique = [];
-        foreach ($fieldsProfile as $name => $stats) {
-            $total    = $stats['total']              ?? null;
-            $nulls    = $stats['nulls']              ?? null;
-            $distinct = $stats['distinct']           ?? null;
-            $cap      = $stats['distinctCapReached'] ?? false;
-            if ($total !== $recordCount || $nulls !== 0 || $cap === true || $distinct !== $recordCount) {
-                continue;
-            }
-            $unique[] = (string)$name;
-        }
-        return $unique;
-    }
-
+    /**
+     * Build field profile + PK candidates + samples from a JSONL file.
+     *
+     * @return array{0:array<string,mixed>,1:int,2:string[],3:array{top:array<int,mixed>,bottom:array<int,mixed>}}
+     */
     private function buildProfile(string $jsonlPath, ?int $limit): array
     {
         $reader = new JsonlReader($jsonlPath);
-
-        $rows  = [];
-        $count = 0;
+        $rows   = [];
+        $count  = 0;
 
         foreach ($reader as $row) {
             $rows[] = $row;
@@ -837,17 +800,32 @@ final class ImportConvertCommand
         // Field-level stats from JsonlProfiler
         $fieldsProfile = $this->profiler->profile($rows);
 
-        // Strict PK-like unique fields (no spaces/special chars, non-empty, no duplicates)
+        // Strict PK-like unique fields (non-null, allowed chars, no duplicates)
         $uniqueFields = $this->detectPrimaryKeyCandidates($fieldsProfile, $count, $rows);
 
-        return [$fieldsProfile, $count, $uniqueFields];
+        // Samples: top 1024 rows + bottom 32 rows
+        $topLimit    = 1024;
+        $bottomLimit = 32;
+
+        $top    = \array_slice($rows, 0, \min($topLimit, $count));
+        $bottom = ($count > $bottomLimit)
+            ? \array_slice($rows, -$bottomLimit)
+            : [];
+
+        $samples = [
+            'top'    => $top,
+            'bottom' => $bottom,
+        ];
+
+        return [$fieldsProfile, $count, $uniqueFields, $samples];
     }
 
     /**
      * Strict PK candidates:
      *  - field present on every row (total === recordCount, nulls === 0)
      *  - all values non-empty scalars
-     *  - no spaces or special characters (only [A-Za-z0-9])
+     *  - no whitespace
+     *  - only [A-Za-z0-9_-] characters (letters, digits, underscore, hyphen)
      *  - no duplicates
      *
      * Result goes into profile["uniqueFields"] and is what the entity
@@ -866,7 +844,6 @@ final class ImportConvertCommand
         }
 
         // Start candidates as fields that are present for every row (no nulls).
-        // We trust totals/nulls from the profiler to quickly prune.
         $candidates = [];
         foreach ($fieldsProfile as $name => $stats) {
             $total = $stats['total'] ?? null;
@@ -892,7 +869,6 @@ final class ImportConvertCommand
                     continue;
                 }
 
-                // Missing field ⇒ not a PK candidate
                 if (!\array_key_exists($name, $row)) {
                     $state['ok'] = false;
                     continue;
@@ -900,13 +876,11 @@ final class ImportConvertCommand
 
                 $value = $row[$name];
 
-                // Null or empty string ⇒ disqualify
                 if ($value === null || $value === '') {
                     $state['ok'] = false;
                     continue;
                 }
 
-                // Arrays / objects etc. ⇒ disqualify
                 if (!\is_scalar($value)) {
                     $state['ok'] = false;
                     continue;
@@ -914,10 +888,14 @@ final class ImportConvertCommand
 
                 $s = (string) $value;
 
-                // Spaces or special characters ⇒ disqualify
-                //  - \s catches spaces, tabs, etc.
-                //  - the second regex allows *only* A-Z, a-z, 0-9
-                if (\preg_match('/\s/', $s) === 1 || \preg_match('/[^A-Za-z0-9]/', $s) === 1) {
+                // Any whitespace at all ⇒ disqualify
+                if (\preg_match('/\s/', $s) === 1) {
+                    $state['ok'] = false;
+                    continue;
+                }
+
+                // Only allow letters, digits, underscore, hyphen
+                if (\preg_match('/[^A-Za-z0-9_-]/', $s) === 1) {
                     $state['ok'] = false;
                     continue;
                 }
@@ -942,11 +920,5 @@ final class ImportConvertCommand
 
         return $result;
     }
-    private function ensureDir(string $filePath): void
-    {
-        $dir = \dirname($filePath);
-        if ($dir !== '' && !\is_dir($dir)) {
-            \mkdir($dir, 0777, true);
-        }
-    }
 }
+
