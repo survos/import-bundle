@@ -26,9 +26,9 @@ final class ImportConvertRowEvent extends Event
     public function __construct(
         public ?array $row,                  // if listener sets to null => row is rejected
         public readonly string $input,       // original input path (CSV/JSON/JSONL/ZIP/GZ)
-        public readonly ?string $format = null, // 'csv', 'json', 'jsonl', 'json_dir', ...
-        public readonly ?int $index = null,      // 0-based record index if known
-        public readonly ?string $tag = null,     // primary tag (from --tag)
+        public readonly ?string $format = null,   // 'csv', 'json', 'jsonl', 'json_dir', ...
+        public readonly ?int $index = null,       // 0-based record index if known
+        public readonly ?string $dataset = null,  // dataset code (e.g. "wam", "marvel")
         public array $tags = [],                 // extra tags (dataset, source, etc.)
         public ?string $status = null,           // see STATUS_* constants
     ) {
