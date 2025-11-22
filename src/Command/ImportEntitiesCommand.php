@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\Mapping\MappingException;
 use League\Csv\Reader as CsvReader;
 use JsonMachine\Items;
+use Survos\CoreBundle\Service\EntityClassResolver;
 use Survos\JsonlBundle\Reader\JsonlReader as SurvosJsonlReader;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Symfony\Component\Console\Attribute\Argument;
@@ -25,13 +26,14 @@ final class ImportEntitiesCommand
     public function __construct(
         private LooseObjectMapper $mapper,
         private string $dataDir, // injected from $config
+        private readonly EntityClassResolver $resolver,
         private ?EntityManagerInterface $em = null,
     ) {
     }
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('entity FQCN, e.g. App\\Entity\\Movie')]
+        #[Argument('Entity class or short name (e.g. "Wam")')]
         ?string $entityClass = null,
         #[Argument('Path to CSV/TSV/JSON/JSONL file')]
         ?string $file = null,
@@ -53,12 +55,14 @@ final class ImportEntitiesCommand
             return Command::FAILURE;
         }
 
-        if (!$entityClass) {
-            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
-        }
-        if (!class_exists($entityClass)) {
-            $entityClass = 'App\\Entity\\' . $entityClass;
-        }
+        $entityClass = $this->resolver->resolve($entityClass);
+//
+//        if (!$entityClass) {
+//            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
+//        }
+//        if (!class_exists($entityClass)) {
+//            $entityClass = 'App\\Entity\\' . $entityClass;
+//        }
 
         if (!class_exists($entityClass)) {
             $io->error("Entity class not found: $entityClass");

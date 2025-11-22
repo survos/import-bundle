@@ -3,7 +3,9 @@
 
 namespace Survos\ImportBundle;
 
+use Survos\ImportBundle\Command\ImportConvertCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
+use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -15,12 +17,20 @@ class SurvosImportBundle extends AbstractBundle
 {
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
+
             $builder->autowire(ImportEntitiesCommand::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true)
                 ->setArgument('$dataDir', $config['dir'])
                 ->addTag('console.command');
             // @todo: inject each service properly
+
+        $builder->autowire(ImportConvertCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->setArgument('$dataDir', $config['dir'])
+            ->addTag('console.command');
+        // @todo: inject each service properly
 
         $builder->autowire(LooseObjectMapper::class)
             ->setPublic(true)
