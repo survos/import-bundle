@@ -62,13 +62,13 @@ final class ImportConvertCommand
 
         $ext      = \strtolower(\pathinfo($input, \PATHINFO_EXTENSION));
         $baseName = \pathinfo($input, \PATHINFO_FILENAME);
+        $dataset ??= $baseName;
         [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
 
-        $jsonlPath   = $output ?? $this->defaultJsonlPath($baseName);
+        $jsonlPath   = $output ?? $this->defaultJsonlPath($dataset);
         $profilePath = $this->defaultProfilePath($jsonlPath);
 
         $baseTags = [];
-        $dataset ??= $baseName;
         if ($dataset !== null) {
             $baseTags[] = $dataset;
         }
