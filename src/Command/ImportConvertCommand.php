@@ -7,6 +7,7 @@ use League\Csv\Reader as CsvReader;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
 use Survos\ImportBundle\Event\ImportConvertStartedEvent;
+use Survos\ImportBundle\Service\RowNormalizer;
 use Survos\JsonlBundle\IO\JsonlReader;
 use Survos\JsonlBundle\IO\JsonlWriter;
 use Survos\JsonlBundle\Service\JsonlProfilerInterface;
@@ -22,14 +23,19 @@ final class ImportConvertCommand
 {
     /** @var array<string,string> normalizedName => originalHeader */
     private array $fieldOriginalNames = [];
+
     /** @var string[] */
     private array $extraTags = [];
+
+    private RowNormalizer $rowNormalizer;
 
     public function __construct(
         private readonly JsonlProfilerInterface $profiler,
         private readonly string $dataDir,
         private readonly ?EventDispatcherInterface $dispatcher = null,
     ) {
+        // Stateless helper – safe to construct here; can later be promoted to DI service.
+        $this->rowNormalizer = new RowNormalizer();
     }
 
     public function __invoke(
@@ -52,6 +58,7 @@ final class ImportConvertCommand
         ?string $rootKey = null,
     ): int {
         $io->title('Import / Convert');
+
         if (!\is_file($input)) {
             $io->error(\sprintf('Input file "%s" does not exist.', $input));
             return Command::FAILURE;
@@ -63,6 +70,7 @@ final class ImportConvertCommand
         $ext      = \strtolower(\pathinfo($input, \PATHINFO_EXTENSION));
         $baseName = \pathinfo($input, \PATHINFO_FILENAME);
         $dataset ??= $baseName;
+
         [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
 
         $jsonlPath   = $output ?? $this->defaultJsonlPath($dataset);
@@ -142,7 +150,7 @@ final class ImportConvertCommand
             'dataset'      => $dataset,
             'uniqueFields' => $uniqueFields,
             'fields'       => $fieldsProfile,
-            'samples'      => $samples, // top/bottom samples for debugging
+            'samples'      => $samples,
         ];
 
         $this->ensureDir($profilePath);
@@ -171,7 +179,9 @@ final class ImportConvertCommand
         return Command::SUCCESS;
     }
 
-    // ---------- helpers ----------
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
 
     private function defaultJsonlPath(string $baseName): string
     {
@@ -205,11 +215,15 @@ final class ImportConvertCommand
         }
     }
 
+    /**
+     * @return string[]
+     */
     private function parseExtraTags(?string $tagsOption): array
     {
         if ($tagsOption === null || $tagsOption === '') {
             return [];
         }
+
         $parts = \array_map('trim', \explode(',', $tagsOption));
         $parts = \array_filter($parts, static fn($t) => $t !== '');
         return \array_values(\array_unique($parts));
@@ -239,18 +253,21 @@ final class ImportConvertCommand
             if ($index === false) {
                 $index = $zip->locateName($normalizedFilter . '/', \ZipArchive::FL_NOCASE);
             }
+
             if ($index !== false) {
                 $name = $zip->getNameIndex($index);
                 if ($name === false) {
                     $zip->close();
                     throw new \RuntimeException(\sprintf('Could not read entry at index %d in ZIP "%s".', $index, $zipPath));
                 }
+
                 if (\str_ends_with($name, '/')) {
                     $dirName = $name;
                     $io->note(\sprintf('ZIP path "%s" is a directory; importing all JSON records under it.', $dirName));
                     $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_dir_' . \uniqid('', true);
                     \mkdir($tmpDir, 0o777, true);
                     $fileNames = [];
+
                     for ($i = 0; $i < $zip->numFiles; $i++) {
                         $n = $zip->getNameIndex($i);
                         if ($n === false) {
@@ -265,6 +282,7 @@ final class ImportConvertCommand
                         }
                         $fileNames[] = $n;
                     }
+
                     if ($fileNames === []) {
                         $zip->close();
                         throw new \RuntimeException(\sprintf(
@@ -273,6 +291,7 @@ final class ImportConvertCommand
                             $zipPath
                         ));
                     }
+
                     if (!$zip->extractTo($tmpDir, $fileNames)) {
                         $zip->close();
                         throw new \RuntimeException(\sprintf(
@@ -281,6 +300,7 @@ final class ImportConvertCommand
                             $zipPath
                         ));
                     }
+
                     $zip->close();
                     $recordsDir = $tmpDir . '/' . \rtrim($dirName, '/');
                     return [$recordsDir, 'json_dir'];
@@ -300,6 +320,7 @@ final class ImportConvertCommand
                 $zip->close();
                 $extractedPath = $tmpDir . '/' . $name;
                 $io->note(\sprintf('ZIP extracted via --zip-path: %s (.%s)', $extractedPath, $ext));
+
                 return [$extractedPath, $ext];
             }
 
@@ -349,6 +370,7 @@ final class ImportConvertCommand
             ));
         }
         $zip->close();
+
         $extractedPath = $tmpDir . '/' . $candidateName;
         return [$extractedPath, $candidateExt];
     }
@@ -358,6 +380,7 @@ final class ImportConvertCommand
         $io->note(\sprintf('GZIP input detected: %s', $gzPath));
         $base     = \pathinfo($gzPath, \PATHINFO_FILENAME);
         $innerExt = \strtolower(\pathinfo($base, \PATHINFO_EXTENSION));
+
         if ($innerExt === '') {
             throw new \RuntimeException(\sprintf(
                 'Cannot infer underlying extension from GZIP file "%s". Expected something like ".csv.gz" or ".json.gz".',
@@ -378,6 +401,7 @@ final class ImportConvertCommand
             \gzclose($gz);
             throw new \RuntimeException(\sprintf('Unable to create temporary file "%s".', $outPath));
         }
+
         while (!\gzeof($gz)) {
             $chunk = \gzread($gz, 8192);
             if ($chunk === false) {
@@ -385,12 +409,17 @@ final class ImportConvertCommand
             }
             \fwrite($out, $chunk);
         }
+
         \gzclose($gz);
         \fclose($out);
 
         $io->note(\sprintf('GZIP decompressed to %s (.%s)', $outPath, $innerExt));
         return [$outPath, $innerExt];
     }
+
+    // ------------------------------------------------------------------
+    // Conversion routines
+    // ------------------------------------------------------------------
 
     private function convertCsvToJsonl(
         string $input,
@@ -410,6 +439,7 @@ final class ImportConvertCommand
 
         $rawHeader = $csv->getHeader();
         $headerMap = [];
+
         foreach ($rawHeader as $name) {
             $normalized                             = $this->normalizeHeaderName($name);
             $headerMap[$name]                      = $normalized;
@@ -435,6 +465,8 @@ final class ImportConvertCommand
                 $normKey                 = $headerMap[$k] ?? $k;
                 $normalizedRow[$normKey] = $v;
             }
+
+            $normalizedRow = $this->rowNormalizer->normalizeRow($normalizedRow);
 
             $row = $this->applyRowCallbacks($normalizedRow, $originalInput, $format, $dataset, $index);
             $index++;
@@ -508,7 +540,8 @@ final class ImportConvertCommand
                 continue;
             }
 
-            $row = $this->applyRowCallbacks($item, $originalInput, $format, $dataset, $index);
+            $item = $this->rowNormalizer->normalizeRow($item);
+            $row  = $this->applyRowCallbacks($item, $originalInput, $format, $dataset, $index);
             $index++;
 
             if ($row === null) {
@@ -582,7 +615,8 @@ final class ImportConvertCommand
                             continue;
                         }
 
-                        $row = $this->applyRowCallbacks($item, $originalInput, 'json', $dataset, $index);
+                        $item = $this->rowNormalizer->normalizeRow($item);
+                        $row  = $this->applyRowCallbacks($item, $originalInput, 'json', $dataset, $index);
                         $index++;
 
                         if ($row === null) {
@@ -597,7 +631,8 @@ final class ImportConvertCommand
                         }
                     }
                 } else {
-                    $row = $this->applyRowCallbacks($decoded, $originalInput, 'json', $dataset, $index);
+                    $decoded = $this->rowNormalizer->normalizeRow($decoded);
+                    $row     = $this->applyRowCallbacks($decoded, $originalInput, 'json', $dataset, $index);
                     $index++;
 
                     if ($row !== null) {
@@ -615,6 +650,7 @@ final class ImportConvertCommand
                     $io->warning(\sprintf('Unable to open JSONL file "%s". Skipping.', $path));
                     continue;
                 }
+
                 while (($line = \fgets($handle)) !== false) {
                     $line = \trim($line);
                     if ($line === '') {
@@ -623,7 +659,8 @@ final class ImportConvertCommand
 
                     $decoded = \json_decode($line, true);
                     if (\is_array($decoded)) {
-                        $row = $this->applyRowCallbacks($decoded, $originalInput, 'jsonl', $dataset, $index);
+                        $decoded = $this->rowNormalizer->normalizeRow($decoded);
+                        $row     = $this->applyRowCallbacks($decoded, $originalInput, 'jsonl', $dataset, $index);
                         $index++;
 
                         if ($row === null) {
@@ -643,6 +680,7 @@ final class ImportConvertCommand
                         return $count;
                     }
                 }
+
                 \fclose($handle);
             } elseif ($ext === 'csv') {
                 $count += $this->appendCsvToJsonl($path, $writer, $limit, $count, $io, $originalInput, $dataset, $index);
@@ -680,6 +718,7 @@ final class ImportConvertCommand
 
         $rawHeader = $csv->getHeader();
         $headerMap = [];
+
         foreach ($rawHeader as $name) {
             $normalized                             = $this->normalizeHeaderName($name);
             $headerMap[$name]                      = $normalized;
@@ -701,6 +740,8 @@ final class ImportConvertCommand
                 $normalizedRow[$normKey] = $v;
             }
 
+            $normalizedRow = $this->rowNormalizer->normalizeRow($normalizedRow);
+
             $row = $this->applyRowCallbacks($normalizedRow, $originalInput, $format, $dataset, $index);
             $index++;
 
@@ -719,6 +760,13 @@ final class ImportConvertCommand
         return $count - $currentCount;
     }
 
+    // ------------------------------------------------------------------
+    // Row callbacks & profiling
+    // ------------------------------------------------------------------
+
+    /**
+     * @param array<string,mixed> $row
+     */
     private function applyRowCallbacks(
         array $row,
         string $input,
@@ -756,6 +804,7 @@ final class ImportConvertCommand
         if ($event->status !== null && $event->status !== ImportConvertRowEvent::STATUS_OKAY) {
             return null;
         }
+
         return $event->row;
     }
 
@@ -766,22 +815,30 @@ final class ImportConvertCommand
         if ($parts === []) {
             return 'field';
         }
+
         $parts = \array_map(static fn($p) => \strtolower($p), $parts);
 
         $camel = \array_shift($parts);
         foreach ($parts as $p) {
             $camel .= \ucfirst($p);
         }
+
         if (!\preg_match('/^[A-Za-z_]/', $camel)) {
             $camel = '_' . $camel;
         }
+
         return $camel;
     }
 
     /**
      * Build field profile + PK candidates + samples from a JSONL file.
      *
-     * @return array{0:array<string,mixed>,1:int,2:string[],3:array{top:array<int,mixed>,bottom:array<int,mixed>}}
+     * @return array{
+     *   0: array<string,mixed>,
+     *   1: int,
+     *   2: string[],
+     *   3: array{top:array<int,mixed>,bottom:array<int,mixed>}
+     * }
      */
     private function buildProfile(string $jsonlPath, ?int $limit): array
     {
@@ -799,6 +856,9 @@ final class ImportConvertCommand
 
         // Field-level stats from JsonlProfiler
         $fieldsProfile = $this->profiler->profile($rows);
+
+        // 🔍 NEW: mark image-like fields (e.g. posterUrl) based on sample rows
+        $fieldsProfile = $this->markImageLikeFields($fieldsProfile, $rows);
 
         // Strict PK-like unique fields (non-null, allowed chars, no duplicates)
         $uniqueFields = $this->detectPrimaryKeyCandidates($fieldsProfile, $count, $rows);
@@ -825,11 +885,8 @@ final class ImportConvertCommand
      *  - field present on every row (total === recordCount, nulls === 0)
      *  - all values non-empty scalars
      *  - no whitespace
-     *  - only [A-Za-z0-9_-] characters (letters, digits, underscore, hyphen)
+     *  - only [A-Za-z0-9_-]
      *  - no duplicates
-     *
-     * Result goes into profile["uniqueFields"] and is what the entity
-     * generator should use as PK candidates.
      *
      * @param array<string,array<string,mixed>> $fieldsProfile
      * @param int                               $recordCount
@@ -843,14 +900,13 @@ final class ImportConvertCommand
             return [];
         }
 
-        // Start candidates as fields that are present for every row (no nulls).
         $candidates = [];
         foreach ($fieldsProfile as $name => $stats) {
             $total = $stats['total'] ?? null;
             $nulls = $stats['nulls'] ?? null;
 
             if ($total !== $recordCount || $nulls !== 0) {
-                continue; // must be present and non-null on every row
+                continue;
             }
 
             $candidates[$name] = [
@@ -888,19 +944,16 @@ final class ImportConvertCommand
 
                 $s = (string) $value;
 
-                // Any whitespace at all ⇒ disqualify
                 if (\preg_match('/\s/', $s) === 1) {
                     $state['ok'] = false;
                     continue;
                 }
 
-                // Only allow letters, digits, underscore, hyphen
                 if (\preg_match('/[^A-Za-z0-9_-]/', $s) === 1) {
                     $state['ok'] = false;
                     continue;
                 }
 
-                // Duplicate value ⇒ disqualify
                 if (isset($state['seen'][$s])) {
                     $state['ok'] = false;
                     continue;
@@ -920,5 +973,75 @@ final class ImportConvertCommand
 
         return $result;
     }
-}
 
+    /**
+     * Mark fields that look like image URLs, based on the sample rows.
+     *
+     * We look for string values whose path ends in a common image extension,
+     * and if a field has *mostly* such values, we flag it.
+     *
+     * Adds to each field in $fieldsProfile:
+     *   - imageLike: bool
+     *   - imageExtensions: string[]
+     *
+     * @param array<string,array<string,mixed>> $fieldsProfile
+     * @param array<int,array<string,mixed>>    $rows
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    private function markImageLikeFields(array $fieldsProfile, array $rows): array
+    {
+        // Extensions we consider "image-ish"
+        $imageExtensions = [
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'svg', 'bmp',
+        ];
+
+        // Per-field counters from sample rows
+        $fieldStats = [];
+
+        foreach ($rows as $row) {
+            foreach ($row as $name => $value) {
+                if (!\is_string($value) || $value === '') {
+                    continue;
+                }
+
+                // Strip query/fragment so ?w=154 doesn't break extension detection
+                $path = \parse_url($value, \PHP_URL_PATH) ?? $value;
+                if (!\is_string($path) || $path === '') {
+                    continue;
+                }
+
+                $ext = \strtolower(\pathinfo($path, \PATHINFO_EXTENSION));
+                if ($ext === '') {
+                    continue;
+                }
+
+                $fieldStats[$name]['total']  = ($fieldStats[$name]['total']  ?? 0) + 1;
+                if (\in_array($ext, $imageExtensions, true)) {
+                    $fieldStats[$name]['images'] = ($fieldStats[$name]['images'] ?? 0) + 1;
+                    $fieldStats[$name]['ext'][$ext] = true;
+                }
+            }
+        }
+
+        foreach ($fieldStats as $name => $stats) {
+            $total  = $stats['total']  ?? 0;
+            $images = $stats['images'] ?? 0;
+
+            if ($total === 0 || $images === 0) {
+                continue;
+            }
+
+            $ratio = $images / $total;
+
+            // Heuristic: at least 3 image-y samples and ≥ 50% of samples look like images
+            if ($images >= 3 && $ratio >= 0.5) {
+                $fieldsProfile[$name]['imageLike']       = true;
+                $fieldsProfile[$name]['imageExtensions'] = \array_keys($stats['ext'] ?? []);
+            }
+        }
+
+        return $fieldsProfile;
+    }
+
+}
