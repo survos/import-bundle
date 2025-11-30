@@ -1,0 +1,8 @@
+parameters:
+    level: 4
+    paths:
+        - src
+    excludePaths: []
+    reportUnmatchedIgnoredErrors: false
+includes:
+    - vendor/phpstan/phpstan-symfony/extension.neon
