@@ -433,7 +433,7 @@ final class ImportConvertCommand
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
         $io->note(\sprintf('Detected CSV delimiter: %s', $delimiter === "\t" ? '\\t (TAB)' : '"," (comma)'));
 
-        $csv = CsvReader::createFromPath($input, 'r');
+        $csv = CsvReader::from($input, 'r');
         $csv->setDelimiter($delimiter);
         $csv->setHeaderOffset(0);
 
@@ -712,7 +712,7 @@ final class ImportConvertCommand
         $firstChunk = \file_get_contents($input, false, null, 0, 4096) ?: '';
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
 
-        $csv = CsvReader::createFromPath($input, 'r');
+        $csv = CsvReader::from($input, 'r');
         $csv->setDelimiter($delimiter);
         $csv->setHeaderOffset(0);
 
