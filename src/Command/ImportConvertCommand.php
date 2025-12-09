@@ -59,19 +59,33 @@ final class ImportConvertCommand
     ): int {
         $io->title('Import / Convert');
 
-        if (!\is_file($input)) {
-            $io->error(\sprintf('Input file "%s" does not exist.', $input));
+        // Accept either a file or a directory
+        if (!\is_file($input) && !\is_dir($input)) {
+            $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
             return Command::FAILURE;
         }
 
         $this->fieldOriginalNames = [];
         $this->extraTags          = $this->parseExtraTags($tagsOption);
 
-        $ext      = \strtolower(\pathinfo($input, \PATHINFO_EXTENSION));
-        $baseName = \pathinfo($input, \PATHINFO_FILENAME);
-        $dataset ??= $baseName;
+        // If the input is a directory, treat it as a "json_dir" pseudo-extension
+        if (\is_dir($input)) {
+            $ext      = 'json_dir';
+            $baseName = \basename($input);
+            $dataset ??= $baseName;
 
-        [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
+            $sourceInput = $input;
+            $sourceExt   = 'json_dir';
+        } else {
+            $ext      = \strtolower(\pathinfo($input, \PATHINFO_EXTENSION));
+            $baseName = \pathinfo($input, \PATHINFO_FILENAME);
+
+// If dataset not explicitly provided, strip common data extensions
+// so "fsa.jsonl" or "fsa.csv" → "fsa"
+            $dataset ??= \preg_replace('/\.(jsonl?|csv)$/i', '', $baseName);
+
+            [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
+        }
 
         $jsonlPath   = $output ?? $this->defaultJsonlPath($dataset);
         $profilePath = $this->defaultProfilePath($jsonlPath);
@@ -101,24 +115,60 @@ final class ImportConvertCommand
         if ($profileOnly) {
             $io->note('Profile-only mode; input is treated as JSONL.');
             $jsonlPath = $sourceInput;
-        } elseif ($sourceExt === 'jsonl') {
-            $io->note('Input already in JSONL format; no conversion needed.');
-            $jsonlPath = $sourceInput;
-        } elseif ($sourceExt === 'csv') {
-            $io->section(\sprintf('Converting CSV to JSONL (from %s)', $sourceInput));
-            $recordCount = $this->convertCsvToJsonl($sourceInput, $jsonlPath, $limit, $io, $input, $dataset);
-            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
-        } elseif ($sourceExt === 'json') {
-            $io->section(\sprintf('Converting JSON array to JSONL (from %s)', $sourceInput));
-            $recordCount = $this->convertJsonArrayToJsonl($sourceInput, $jsonlPath, $limit, $rootKey, $io, $input, $dataset);
-            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
-        } elseif ($sourceExt === 'json_dir') {
-            $io->section(\sprintf('Converting JSON records directory to JSONL (from %s)', $sourceInput));
-            $recordCount = $this->convertJsonRecordsDirToJsonl($sourceInput, $jsonlPath, $limit, $io, $input, $dataset);
-            $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
         } else {
-            $io->error(\sprintf('Unsupported input extension ".%s". Use CSV, JSON, or JSONL.', $sourceExt));
-            return Command::FAILURE;
+            switch ($sourceExt) {
+                case 'jsonl':
+                    $io->note('Input already in JSONL format; no conversion needed.');
+                    $jsonlPath = $sourceInput;
+                    break;
+
+                case 'csv':
+                    $io->section(\sprintf('Converting CSV to JSONL (from %s)', $sourceInput));
+                    $recordCount = $this->convertCsvToJsonl(
+                        $sourceInput,
+                        $jsonlPath,
+                        $limit,
+                        $io,
+                        $input,
+                        $dataset
+                    );
+                    $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+                    break;
+
+                case 'json':
+                    $io->section(\sprintf('Converting JSON array to JSONL (from %s)', $sourceInput));
+                    $recordCount = $this->convertJsonArrayToJsonl(
+                        $sourceInput,
+                        $jsonlPath,
+                        $limit,
+                        $rootKey,
+                        $io,
+                        $input,
+                        $dataset
+                    );
+                    $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+                    break;
+
+                case 'json_dir':
+                    $io->section(\sprintf('Converting JSON records directory to JSONL (from %s)', $sourceInput));
+                    $recordCount = $this->convertJsonRecordsDirToJsonl(
+                        $sourceInput,
+                        $jsonlPath,
+                        $limit,
+                        $io,
+                        $input,
+                        $dataset
+                    );
+                    $io->success(\sprintf('Converted %d records to %s', $recordCount, $jsonlPath));
+                    break;
+
+                default:
+                    $io->error(\sprintf(
+                        'Unsupported input extension ".%s". Use CSV, JSON, JSONL, or a directory.',
+                        $sourceExt
+                    ));
+                    return Command::FAILURE;
+            }
         }
 
         $io->section('Profiling JSONL');
@@ -191,9 +241,18 @@ final class ImportConvertCommand
 
     private function defaultProfilePath(string $jsonlPath): string
     {
-        $dir  = \dirname($jsonlPath);
-        $base = \pathinfo($jsonlPath, \PATHINFO_FILENAME);
-        return \sprintf('%s/%s.profile.json', $dir, $base);
+        $dir      = \dirname($jsonlPath);
+        $filename = \basename($jsonlPath);
+
+        // Strip .gz if present
+        if (\str_ends_with($filename, '.gz')) {
+            $filename = \substr($filename, 0, -3); // remove ".gz"
+        }
+
+        // Strip one trailing .jsonl or .json
+        $filename = \preg_replace('/\.(jsonl|json)$/i', '', $filename, 1);
+
+        return \sprintf('%s/%s.profile.json', $dir, $filename);
     }
 
     private function ensureDir(string $filePath): void
@@ -333,7 +392,7 @@ final class ImportConvertCommand
         }
 
         $candidateName = null;
-        $candidateExt  = null;
+               $candidateExt  = null;
         $priority      = ['csv', 'json', 'jsonl'];
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -433,7 +492,7 @@ final class ImportConvertCommand
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
         $io->note(\sprintf('Detected CSV delimiter: %s', $delimiter === "\t" ? '\\t (TAB)' : '"," (comma)'));
 
-        $csv = CsvReader::from($input, 'r');
+        $csv = CsvReader::fromPath($input, 'r');
         $csv->setDelimiter($delimiter);
         $csv->setHeaderOffset(0);
 
@@ -645,19 +704,15 @@ final class ImportConvertCommand
                     }
                 }
             } elseif ($ext === 'jsonl') {
-                $handle = \fopen($path, 'rb');
-                if ($handle === false) {
-                    $io->warning(\sprintf('Unable to open JSONL file "%s". Skipping.', $path));
+                // Use JsonlReader from JsonlBundle instead of manual fgets
+                try {
+                    $reader = JsonlReader::open($path);
+                } catch (\Throwable $e) {
+                    $io->warning(\sprintf('Unable to open JSONL file "%s". Skipping. (%s)', $path, $e->getMessage()));
                     continue;
                 }
 
-                while (($line = \fgets($handle)) !== false) {
-                    $line = \trim($line);
-                    if ($line === '') {
-                        continue;
-                    }
-
-                    $decoded = \json_decode($line, true);
+                foreach ($reader as $decoded) {
                     if (\is_array($decoded)) {
                         $decoded = $this->rowNormalizer->normalizeRow($decoded);
                         $row     = $this->applyRowCallbacks($decoded, $originalInput, 'jsonl', $dataset, $index);
@@ -670,20 +725,26 @@ final class ImportConvertCommand
                         $writer->write($row);
                         $count++;
                     } else {
-                        $writer->write(['raw' => $line]);
+                        $writer->write(['raw' => $decoded]);
                         $count++;
                     }
 
                     if ($limit !== null && $count >= $limit) {
-                        \fclose($handle);
                         $writer->close();
                         return $count;
                     }
                 }
-
-                \fclose($handle);
             } elseif ($ext === 'csv') {
-                $count += $this->appendCsvToJsonl($path, $writer, $limit, $count, $io, $originalInput, $dataset, $index);
+                $count += $this->appendCsvToJsonl(
+                    $path,
+                    $writer,
+                    $limit,
+                    $count,
+                    $io,
+                    $originalInput,
+                    $dataset,
+                    $index
+                );
                 if ($limit !== null && $count >= $limit) {
                     $writer->close();
                     return $count;
@@ -712,7 +773,7 @@ final class ImportConvertCommand
         $firstChunk = \file_get_contents($input, false, null, 0, 4096) ?: '';
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
 
-        $csv = CsvReader::from($input, 'r');
+        $csv = CsvReader::fromPath($input, 'r');
         $csv->setDelimiter($delimiter);
         $csv->setHeaderOffset(0);
 
@@ -842,7 +903,7 @@ final class ImportConvertCommand
      */
     private function buildProfile(string $jsonlPath, ?int $limit): array
     {
-        $reader = new JsonlReader($jsonlPath);
+        $reader = JsonlReader::open($jsonlPath);
         $rows   = [];
         $count  = 0;
 
@@ -1043,5 +1104,4 @@ final class ImportConvertCommand
 
         return $fieldsProfile;
     }
-
 }

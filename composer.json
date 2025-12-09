@@ -26,7 +26,8 @@
         "doctrine/orm": "^3.5",
         "symfony/serializer": "^7.4||^8.0",
         "phpstan/phpstan-symfony": "^2.0",
-        "survos/jsonl-bundle": "^2.0"
+        "survos/jsonl-bundle": "^2.0",
+        "league/csv": "^9.27"
     },
     "autoload": {
         "psr-4": {
