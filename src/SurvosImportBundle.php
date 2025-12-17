@@ -5,8 +5,12 @@ namespace Survos\ImportBundle;
 
 use Survos\ImportBundle\Command\ImportConvertCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
+use Survos\ImportBundle\Command\ImportProfileReportCommand;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\LooseObjectMapper;
+use Survos\ImportBundle\Service\Provider\RowProviderInterface;
+use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
+use Survos\ImportBundle\Service\RowNormalizer;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -17,6 +21,28 @@ class SurvosImportBundle extends AbstractBundle
 {
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
+
+        $builder->autowire(RowProviderRegistry::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ;
+
+        $builder->autowire(RowNormalizer::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+        ;
+
+        $builder->registerForAutoconfiguration(RowProviderInterface::class)
+            ->addTag('survos.import.row_provider');
+
+        $builder->autowire(\Survos\ImportBundle\Service\Provider\CsvRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonlRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonDirRowProvider::class)->setAutoconfigured(true);
+
+
+        $builder->registerForAutoconfiguration(RowProviderInterface::class)
+            ->addTag('survos.import.row_provider');
 
             $builder->autowire(ImportEntitiesCommand::class)
                 ->setPublic(true)
@@ -30,6 +56,13 @@ class SurvosImportBundle extends AbstractBundle
             ->setAutoconfigured(true)
             ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
+
+        $builder->autowire(ImportProfileReportCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->setArgument('$dataDir', $config['dir'])
+            ->addTag('console.command');
+
         // @todo: inject each service properly
 
         $builder->autowire(LooseObjectMapper::class)

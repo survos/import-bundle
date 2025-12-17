@@ -55,15 +55,15 @@ final class ImportEntitiesCommand
             return Command::FAILURE;
         }
 
-        $entityClass = $this->resolver->resolve($entityClass);
-//
-//        if (!$entityClass) {
-//            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
-//        }
-//        if (!class_exists($entityClass)) {
-//            $entityClass = 'App\\Entity\\' . $entityClass;
-//        }
 
+        if (!$entityClass) {
+            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
+        }
+        if (!class_exists($entityClass)) {
+            $entityClass = 'App\\Entity\\' . $entityClass;
+        }
+
+        $entityClass = $this->resolver->resolve($entityClass);
         if (!class_exists($entityClass)) {
             $io->error("Entity class not found: $entityClass");
             return Command::FAILURE;
