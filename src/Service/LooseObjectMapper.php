@@ -12,6 +12,7 @@ use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter
 use Symfony\Component\String\UnicodeString;
 use Symfony\Component\TypeInfo\Type;
 use Symfony\Component\TypeInfo\TypeIdentifier;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * Best-effort array/stdClass → object mapper (Symfony 7.3 / PHP 8.4).

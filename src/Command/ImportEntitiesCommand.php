@@ -20,6 +20,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 #[AsCommand('import:entities', 'Import records from a CSV/TSV/JSON/JSONL into a Doctrine entity')]
 final class ImportEntitiesCommand
@@ -29,6 +30,8 @@ final class ImportEntitiesCommand
         private string $dataDir, // injected from $config
         private readonly EntityClassResolver $resolver,
         private ?EntityManagerInterface $em = null,
+        private ?ValidatorInterface $validator = null,
+
     ) {
     }
 
@@ -48,6 +51,8 @@ final class ImportEntitiesCommand
         bool $reset = false,
         #[Option(description: 'Verbose per-batch progress')]
         bool $progress = true,
+        #[Option(description: 'validate the entity after mapping')]
+        ?bool $validate = null,
         #[Option(description: 'no id, use auto-increment', name: 'auto')]
         bool $idIsLineNumber = false,
     ): int {
@@ -55,6 +60,7 @@ final class ImportEntitiesCommand
             $io->error("composer req doctrine/orm");
             return Command::FAILURE;
         }
+        $validate ??= true;
 
 
         if (!$entityClass) {
@@ -175,6 +181,23 @@ final class ImportEntitiesCommand
             // Map remaining data into entity; ignore PK
             $ignore = $pkField??false ? [$pkField] : [];
             $this->mapper->mapInto($row, $entity, ignored: $ignore);
+            if ($validate) {
+                if (!$this->validator) {
+                    throw new \RuntimeException("Install symfony/validator");
+                    }
+                    $errors = $this->validator->validate($entity);
+                    if (count($errors) > 0) {
+                        foreach ($errors as $error) {
+                            $io->warning(sprintf('Row %d [%s]: %s (value: "%s")',
+                                $i,
+                                $error->getPropertyPath(),
+                                $error->getMessage(),
+                                mb_substr((string) $error->getInvalidValue(), 0, 50)
+                            ));
+                        }
+                        continue; // or collect for summary
+                    }
+            }
 
             $i++;
             if ($batch > 0 && ($i % $batch) === 0) {
