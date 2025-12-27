@@ -10,7 +10,8 @@ use Doctrine\Persistence\Mapping\MappingException;
 use League\Csv\Reader as CsvReader;
 use JsonMachine\Items;
 use Survos\CoreBundle\Service\EntityClassResolver;
-use Survos\JsonlBundle\Reader\JsonlReader as SurvosJsonlReader;
+// is this best?
+use Survos\JsonlBundle\IO\JsonlReader as SurvosJsonlReader;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
