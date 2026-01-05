@@ -113,7 +113,7 @@ final class ImportConvertCommand
 
         if ($this->dispatcher) {
             $this->dispatcher->dispatch(
-                new ImportConvertStartedEvent(
+                $event = new ImportConvertStartedEvent(
                     $input,
                     $jsonlPath,
                     $profilePath,

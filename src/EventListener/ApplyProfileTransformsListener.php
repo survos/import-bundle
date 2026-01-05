@@ -14,6 +14,7 @@ final class ApplyProfileTransformsListener
     #[AsEventListener(event: ImportConvertRowEvent::class)]
     public function onRow(ImportConvertRowEvent $event): void
     {
+        dd($event);
         $profilePath = $event->applyProfilePath;
 
         if ($profilePath === null || $profilePath === '') {
