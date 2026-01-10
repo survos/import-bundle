@@ -31,7 +31,8 @@
         "survos/jsonl-bundle": "^2.0",
         "league/csv": "^9.27",
         "halaxa/json-machine": "^1.2",
-        "symfony/validator": "^8.0"
+        "symfony/validator": "^8.0",
+        "museado/data-bundle": "^1.0"
     },
     "autoload": {
         "psr-4": {
