@@ -17,6 +17,7 @@ final class ImportProfileReportCommand
 {
     public function __construct(
         private readonly string $dataDir,
+        private readonly ?\Survos\ImportBundle\Contract\DatasetPathsFactoryInterface $pathsFactory = null,
     ) {
     }
 
@@ -139,11 +140,30 @@ final class ImportProfileReportCommand
         }
 
         if (is_string($dataset) && $dataset !== '') {
+            if ($this->pathsFactory !== null) {
+                $paths = $this->pathsFactory->for($dataset);
+                return $paths->profileObjectPath();
+            }
+
             $dir = rtrim($this->dataDir, '/');
             return sprintf('%s/%s.profile.json', $dir, $dataset);
         }
 
         return null;
+    }
+
+    private function profilePathFromJsonl(string $jsonlPath): string
+    {
+        $dir = dirname($jsonlPath);
+        $filename = basename($jsonlPath);
+
+        if (str_ends_with($filename, '.gz')) {
+            $filename = substr($filename, 0, -3);
+        }
+
+        $filename = preg_replace('/\.(jsonl|json)$/i', '', $filename, 1);
+
+        return sprintf('%s/%s.profile.json', $dir, $filename);
     }
 
     /**

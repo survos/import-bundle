@@ -3,6 +3,7 @@
 
 namespace Survos\ImportBundle;
 
+use Survos\ImportBundle\Command\ImportBrowseCommand;
 use Survos\ImportBundle\Command\ImportConvertCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
@@ -62,6 +63,21 @@ class SurvosImportBundle extends AbstractBundle
             ->setAutoconfigured(true)
             ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
+
+        $builder->autowire(ImportBrowseCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->addTag('console.command');
+
+        // Register adapter for data-bundle integration if data-bundle is available
+        if (class_exists(\Museado\DataBundle\Service\DataPaths::class)) {
+            $builder->autowire(\Survos\ImportBundle\Service\DataPathsFactoryAdapter::class)
+                ->setPublic(true)
+                ->setAutoconfigured(true);
+                
+            // Alias the adapter to the interface
+            $builder->setAlias(\Survos\ImportBundle\Contract\DatasetPathsFactoryInterface::class, \Survos\ImportBundle\Service\DataPathsFactoryAdapter::class);
+        }
 
         // @todo: inject each service properly
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
+use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
 use Survos\ImportBundle\Event\ImportConvertStartedEvent;
@@ -16,6 +17,7 @@ use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -33,41 +35,78 @@ final class ImportConvertCommand
         private readonly RowProviderRegistry $rowProviders,
         private readonly RowNormalizer $rowNormalizer,
         private readonly string $dataDir,
+        private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
     ) {
     }
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Input CSV/JSON/JSONL path (ZIP/GZ supported)')]
-        string $input,
-        #[Option('Override output JSONL path (defaults to <dataDir>/<base>.jsonl)')]
+
+        #[Argument('Input CSV/JSON/JSONL path (ZIP/GZ supported). Optional when --dataset is provided.')]
+        ?string $input = null,
+
+        #[Option('Override output JSONL path (defaults to <dataDir>/<base>.jsonl, or dataset-aware defaults when --dataset is provided)')]
         ?string $output = null,
+
         #[Option('Max records to process (for convert/profile)')]
         ?int $limit = null,
+
         #[Option('Treat input as JSONL and only generate the profile')]
         bool $profileOnly = false,
+
         #[Option('Dataset code (e.g. "wam", "marvel")')]
         ?string $dataset = null,
+
         #[Option('Additional tags (comma-separated, e.g. "wikidata,youtube")', name: 'tags')]
         ?string $tagsOption = null,
+
         #[Option('If input is a ZIP file, extract only this internal path (file or directory)')]
         ?string $zipPath = null,
+
         #[Option('If input JSON has a root key containing the list (e.g. "products")')]
         ?string $rootKey = null,
 
-        #[Option('Apply transforms from a prior profile.json (second pass). If passed with no value, uses the default profile path for this dataset/output.')]
-        ?bool $applyProfile = null,
+        #[Option(
+            'Apply transforms from a prior profile.json (second pass). Pass a profile path explicitly to apply it.'
+        )]
+        ?string $applyProfile = null,
     ): int {
         $io->title('Import / Convert');
+
+        $this->fieldOriginalNames = [];
+        $this->extraTags          = $this->parseExtraTags($tagsOption);
+
+        // Dataset-only invocation:
+        //   bin/console import:convert --dataset=fortepan
+        // Resolve canonical input/output/profile paths via DatasetPathsFactory (if registered).
+        $paths = null;
+        if (($input === null || $input === '') && ($dataset !== null && $dataset !== '')) {
+            if ($this->pathsFactory === null) {
+                $io->error(\sprintf(
+                    'Missing <input>. You passed --dataset=%s, but no DatasetPathsFactoryInterface is registered. ' .
+                    'Enable museado/data-bundle (or provide your own factory), or pass an explicit input path.',
+                    $dataset
+                ));
+                return Command::FAILURE;
+            }
+
+            $paths = $this->pathsFactory->for($dataset);
+            $input = $paths->rawObjectPath;
+
+            // Prefer canonical normalized output unless caller provided --output
+            $output ??= $paths->normalizedObjectPath;
+        }
+
+        if ($input === null || $input === '') {
+            $io->error('Missing input. Provide <input> or pass --dataset to infer the canonical raw input path.');
+            return Command::FAILURE;
+        }
 
         if (!\is_file($input) && !\is_dir($input)) {
             $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
             return Command::FAILURE;
         }
-
-        $this->fieldOriginalNames = [];
-        $this->extraTags          = $this->parseExtraTags($tagsOption);
 
         // Determine dataset + source
         if (\is_dir($input)) {
@@ -82,18 +121,26 @@ final class ImportConvertCommand
             [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
         }
 
-        $jsonlPath   = $output ?? $this->defaultJsonlPath((string) $dataset);
-        $profilePath = $this->defaultProfilePath($jsonlPath);
+        // If dataset is known and a factory exists, prefer canonical output/profile defaults (unless overridden).
+        if ($paths === null && $dataset !== null && $dataset !== '' && $this->pathsFactory !== null) {
+            $paths = $this->pathsFactory->for($dataset);
+        }
+
+        $jsonlPath = $output ?? (
+            $paths ? $paths->normalizedObjectPath : $this->defaultJsonlPath((string) $dataset)
+        );
+
+        $profilePath = $paths
+            ? $paths->profileObjectPath()
+            : $this->defaultProfilePath($jsonlPath);
 
         // Resolve --apply-profile:
-        //  - null  => no transforms
-        //  - true  => use canonical profile path for this run
-        //  - string => use that explicit file path
+        //  - not provided => no transforms
+        //  - provided with no value => use $profilePath
+        //  - provided with value => that explicit file path
         $applyProfilePath = null;
-        if ($applyProfile === true) {
-            $applyProfilePath = $profilePath;
-        } elseif (\is_string($applyProfile) && $applyProfile !== '') {
-            $applyProfilePath = $applyProfile;
+        if ($applyProfile !== null) {
+            $applyProfilePath = ($applyProfile === '') ? $profilePath : $applyProfile;
         }
 
         if ($applyProfilePath !== null && !\is_file($applyProfilePath)) {
@@ -113,7 +160,7 @@ final class ImportConvertCommand
 
         if ($this->dispatcher) {
             $this->dispatcher->dispatch(
-                $event = new ImportConvertStartedEvent(
+                new ImportConvertStartedEvent(
                     $input,
                     $jsonlPath,
                     $profilePath,
@@ -131,6 +178,7 @@ final class ImportConvertCommand
             $io->note('Profile-only mode; input is treated as JSONL.');
             $jsonlPath = $sourceInput;
         } else {
+            // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
             $this->resetJsonlOutput($jsonlPath);
             $this->ensureDir($jsonlPath);
 
