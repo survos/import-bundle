@@ -3,11 +3,39 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
+use Survos\ImportBundle\Contract\DatasetContextInterface;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
+
+use function array_map;
+use function array_slice;
+use function basename;
+use function count;
+use function dirname;
+use function file_get_contents;
+use function implode;
+use function in_array;
+use function is_array;
+use function is_file;
+use function is_float;
+use function is_numeric;
+use function is_string;
+use function json_decode;
+use function json_encode;
+use function preg_match;
+use function preg_replace;
+use function restore_error_handler;
+use function rtrim;
+use function set_error_handler;
+use function sprintf;
+use function str_ends_with;
+use function strtolower;
+use function substr;
+use function trim;
+use function usort;
 
 #[AsCommand(
     'import:profile:report',
@@ -18,6 +46,7 @@ final class ImportProfileReportCommand
     public function __construct(
         private readonly string $dataDir,
         private readonly ?\Survos\ImportBundle\Contract\DatasetPathsFactoryInterface $pathsFactory = null,
+        private readonly ?DatasetContextInterface $datasetContext = null,
     ) {
     }
 
@@ -88,7 +117,13 @@ final class ImportProfileReportCommand
             }
 
             if ($match !== null && $match !== '') {
-                $ok = @preg_match($match, (string) $name);
+                try {
+                    $ok = $this->safePregMatch($match, (string) $name);
+                } catch (\RuntimeException $e) {
+                    $io->error($e->getMessage());
+                    return Command::FAILURE;
+                }
+
                 if ($ok !== 1) {
                     continue;
                 }
@@ -139,6 +174,10 @@ final class ImportProfileReportCommand
             return $profile;
         }
 
+        if (($dataset === null || $dataset === '') && $this->datasetContext !== null && $this->datasetContext->has()) {
+            $dataset = $this->datasetContext->get();
+        }
+
         if (is_string($dataset) && $dataset !== '') {
             if ($this->pathsFactory !== null) {
                 $paths = $this->pathsFactory->for($dataset);
@@ -150,6 +189,32 @@ final class ImportProfileReportCommand
         }
 
         return null;
+    }
+
+    private function safePregMatch(string $pattern, string $subject): int
+    {
+        $warning = null;
+
+        set_error_handler(static function (int $severity, string $message) use (&$warning): bool {
+            $warning = $message;
+            return true;
+        });
+
+        try {
+            $result = preg_match($pattern, $subject);
+        } finally {
+            restore_error_handler();
+        }
+
+        if ($result === false) {
+            throw new \RuntimeException(sprintf(
+                'Invalid --match regex %s (%s).',
+                $pattern,
+                $warning ?? 'preg_match failed'
+            ));
+        }
+
+        return $result;
     }
 
     private function profilePathFromJsonl(string $jsonlPath): string
