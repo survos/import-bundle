@@ -6,6 +6,7 @@ namespace Survos\ImportBundle;
 use Survos\ImportBundle\Command\ImportBrowseCommand;
 use Survos\ImportBundle\Command\ImportConvertCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
+use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\LooseObjectMapper;
@@ -65,6 +66,11 @@ class SurvosImportBundle extends AbstractBundle
             ->addTag('console.command');
 
         $builder->autowire(ImportBrowseCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->addTag('console.command');
+
+        $builder->autowire(ImportFilesystemCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
             ->addTag('console.command');
