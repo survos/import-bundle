@@ -12,6 +12,7 @@
         "symfony/config": "^7.4||^8.0",
         "symfony/dependency-injection": "^7.4||^8.0",
         "symfony/http-kernel": "^7.4||^8.0",
+        "symfony/stopwatch": "^7.4||^8.0",
         "twig/twig": "^3.4",
         "symfony/type-info": "^7.4||^8.0",
         "symfony/property-access": "^8.0"
