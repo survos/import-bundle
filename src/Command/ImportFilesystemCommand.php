@@ -75,6 +75,9 @@ final class ImportFilesystemCommand
 
         #[Option('Progress mode: buckets (top-level ETA), indeterminate (no pre-scan), none')]
         string $progressMode = 'buckets',
+
+        #[Option('Include dotfiles and dot directories')]
+        bool $includeHidden = false,
     ): int {
         if ($probe < 0 || $probe > 3) {
             $io->error('Probe level must be 0, 1, 2, or 3.');
@@ -153,6 +156,9 @@ final class ImportFilesystemCommand
                 }
 
                 $name = $entry->getFilename();
+                if (!$includeHidden && str_starts_with($name, '.')) {
+                    continue;
+                }
                 $path = $entry->getPathname();
                 if (in_array($name, $excludedDirectories, true) || in_array($path, $excludedDirectories, true)) {
                     continue;
@@ -163,6 +169,7 @@ final class ImportFilesystemCommand
 
             $rootFinder = new Finder();
             $rootFinder->files()->in($directory)->depth('== 0');
+            $rootFinder->ignoreDotFiles(!$includeHidden);
             if (!empty($allowedExtensions)) {
                 $rootFinder->name(sprintf('/\.(%s)$/i', implode('|', $allowedExtensions)));
             }
@@ -171,6 +178,7 @@ final class ImportFilesystemCommand
             foreach ($topLevelDirectories as $topLevelDirectory) {
                 $bucketFinder = new Finder();
                 $bucketFinder->files()->in($topLevelDirectory);
+                $bucketFinder->ignoreDotFiles(!$includeHidden);
                 foreach ($excludedDirectories as $excludeDir) {
                     $bucketFinder->notPath($excludeDir);
                 }
@@ -182,6 +190,7 @@ final class ImportFilesystemCommand
         } else {
             $finder = new Finder();
             $finder->files()->in($directory);
+            $finder->ignoreDotFiles(!$includeHidden);
             foreach ($excludedDirectories as $excludeDir) {
                 $finder->notPath($excludeDir);
             }
@@ -233,20 +242,27 @@ final class ImportFilesystemCommand
                 'probe_level' => $probe,
             ];
 
+            $isReadable = $file->isReadable();
+            if (!$isReadable) {
+                $io->warning(sprintf('Unreadable file: %s', $filepath));
+            }
+
             if ($probe >= 1) {
                 $metadata['extension'] = strtolower(pathinfo($filepath, PATHINFO_EXTENSION));
                 $size = $file->getSize();
                 $metadata['size'] = $size;
                 $totalSize += $size;
-                $mimeType = $this->detectMimeType($filepath);
-                if ($mimeType !== null) {
-                    $metadata['mime_type'] = $mimeType;
+                if ($isReadable) {
+                    $mimeType = $this->detectMimeType($filepath);
+                    if ($mimeType !== null) {
+                        $metadata['mime_type'] = $mimeType;
+                    }
                 }
                 $metadata['created_time'] = $file->getCTime();
                 $metadata['modified_time'] = $file->getMTime();
-                $metadata['is_readable'] = $file->isReadable();
+                $metadata['is_readable'] = $isReadable;
 
-                if ($xxh3Available && $file->isReadable()) {
+                if ($xxh3Available && $isReadable) {
                     $checksum = $this->computeXxh3Checksum($filepath);
                     if ($checksum !== null) {
                         $metadata['checksum_xxh3'] = $checksum;
@@ -260,11 +276,11 @@ final class ImportFilesystemCommand
                 }
             }
 
-            if ($probe >= 2) {
+            if ($probe >= 2 && $isReadable) {
                 $metadata += $this->probeDeep($filepath, $metadata['extension'] ?? null, $metadata['mime_type'] ?? null);
             }
 
-            if ($probe >= 3 && $file->isReadable() && $this->shouldProbeMedia($metadata['extension'] ?? null, $metadata['mime_type'] ?? null)) {
+            if ($probe >= 3 && $isReadable && $this->shouldProbeMedia($metadata['extension'] ?? null, $metadata['mime_type'] ?? null)) {
                 if ($fpcalcAvailable && !$this->isFpcalcAvailable()) {
                     $fpcalcAvailable = false;
                     $io->warning('fpcalc (Chromaprint) is not available; audio fingerprints will be omitted.');
