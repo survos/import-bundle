@@ -42,13 +42,20 @@ use function hash_init;
 use function hash_update_stream;
 use function hash_final;
 use function hash;
+use function sha1;
 use function json_decode;
 use function is_array;
 use function count;
 use function min;
+use function array_filter;
+use function array_values;
 use function strtolower;
 use function trim;
 use function rtrim;
+use function realpath;
+use function strlen;
+use function substr;
+use function ltrim;
 
 #[AsCommand('import:filesystem', 'Scan local filesystem directories and output JSONL for processing')]
 final class ImportFilesystemCommand
@@ -78,6 +85,12 @@ final class ImportFilesystemCommand
 
         #[Option('Include dotfiles and dot directories')]
         bool $includeHidden = false,
+
+        #[Option('Root id for this scan (used by file proxy)')]
+        ?string $rootId = null,
+
+        #[Option('Root path override for this scan')]
+        ?string $rootPath = null,
     ): int {
         if ($probe < 0 || $probe > 3) {
             $io->error('Probe level must be 0, 1, 2, or 3.');
@@ -99,6 +112,10 @@ final class ImportFilesystemCommand
             $io->error(sprintf('Directory not found: %s', $directory));
             return Command::FAILURE;
         }
+
+        $rootId ??= basename(rtrim($directory, '/'));
+        $rootPath ??= $directory;
+        $rootPathReal = realpath($rootPath) ?: $rootPath;
 
         // Parse extensions filter
         $allowedExtensions = [];
@@ -232,13 +249,21 @@ final class ImportFilesystemCommand
 
             foreach ($finder as $file) {
                 $filepath = $file->getPathname();
-                $relativePath = $file->getRelativePathname();
+                $relativePath = $this->relativeToRoot($filepath, $rootPathReal, $file->getRelativePathname());
             
+            $id = $xxh3Available ? hash('xxh3', $relativePath) : sha1($relativePath);
+
             $metadata = [
+                'id' => $id,
+                'root_id' => $rootId,
+                'root_path' => $rootPath,
                 'path' => $filepath,
                 'relative_path' => $relativePath,
                 'filename' => basename($filepath),
+                'basename' => basename($filepath),
                 'dirname' => dirname($filepath),
+                'extension' => strtolower(pathinfo($filepath, PATHINFO_EXTENSION)),
+                'tags' => $this->parentDirTags($relativePath),
                 'probe_level' => $probe,
             ];
 
@@ -248,7 +273,6 @@ final class ImportFilesystemCommand
             }
 
             if ($probe >= 1) {
-                $metadata['extension'] = strtolower(pathinfo($filepath, PATHINFO_EXTENSION));
                 $size = $file->getSize();
                 $metadata['size'] = $size;
                 $totalSize += $size;
@@ -614,5 +638,29 @@ final class ImportFilesystemCommand
         }
 
         return $matches / $len;
+    }
+
+    /** @return string[] */
+    private function parentDirTags(string $relativePath): array
+    {
+        $relativeDir = dirname($relativePath);
+        if ($relativeDir === '.' || $relativeDir === '') {
+            return [];
+        }
+
+        return array_values(array_filter(explode('/', $relativeDir), static fn(string $p) => $p !== ''));
+    }
+
+    private function relativeToRoot(string $filePath, string $rootPath, string $fallback): string
+    {
+        $fileReal = realpath($filePath) ?: $filePath;
+        $rootReal = rtrim($rootPath, '/');
+
+        if ($rootReal !== '' && str_starts_with($fileReal, $rootReal)) {
+            $relative = substr($fileReal, strlen($rootReal));
+            return ltrim($relative, '/');
+        }
+
+        return $fallback;
     }
 }

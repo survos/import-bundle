@@ -21,6 +21,17 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
+use function array_filter;
+use function array_values;
+use function explode;
+use function ltrim;
+use function preg_match;
+use function realpath;
+use function rtrim;
+use function str_starts_with;
+use function strlen;
+use function substr;
+
 #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL and generate a profile')]
 final class ImportConvertCommand
 {
@@ -106,6 +117,13 @@ final class ImportConvertCommand
         if (!\is_file($input) && !\is_dir($input)) {
             $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
             return Command::FAILURE;
+        }
+
+        if (($dataset === null || $dataset === '') && $input !== null) {
+            $guessed = $this->inferDatasetFromInput($input);
+            if ($guessed !== null) {
+                $dataset = $guessed;
+            }
         }
 
         // Determine dataset + source
@@ -280,6 +298,39 @@ final class ImportConvertCommand
         }
 
         return Command::SUCCESS;
+    }
+
+    private function inferDatasetFromInput(string $input): ?string
+    {
+        $dataRoot = rtrim($this->dataDir, '/');
+        $inputReal = realpath($input) ?: $input;
+
+        if (!str_starts_with($inputReal, $dataRoot . '/')) {
+            return null;
+        }
+
+        $relative = substr($inputReal, strlen($dataRoot) + 1);
+        $parts = array_values(array_filter(explode('/', ltrim($relative, '/')), static fn(string $p) => $p !== ''));
+        if ($parts === []) {
+            return null;
+        }
+
+        foreach ($parts as $i => $part) {
+            if ($part === 'data' && isset($parts[$i + 1]) && $parts[$i + 1] !== '') {
+                return $parts[$i + 1];
+            }
+        }
+
+        foreach ($parts as $i => $part) {
+            if (preg_match('/^\d{2}_[a-z0-9_]+$/i', $part) !== 1) {
+                continue;
+            }
+            if ($i > 0 && $parts[$i - 1] !== '') {
+                return $parts[$i - 1];
+            }
+        }
+
+        return null;
     }
 
     // ------------------------------------------------------------------

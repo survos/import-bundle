@@ -3,6 +3,11 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Model;
 
+use function basename;
+use function dirname;
+use function preg_replace;
+use function sprintf;
+
 /**
  * Immutable value object describing all canonical paths
  * associated with a dataset.
@@ -28,11 +33,14 @@ final class DatasetPaths
 
         // Terms / termsets
         public readonly string $termsDir,
+
+        // Profile output (optional override)
+        public readonly ?string $profileDir = null,
     ) {}
 
     public function profileObjectPath(): string
     {
-        $dir = dirname($this->normalizedObjectPath);
+        $dir = $this->profileDir ?? dirname($this->normalizedObjectPath);
         $base = basename($this->normalizedObjectPath);
 
         $base = preg_replace('/\.jsonl$/i', '', $base, 1);

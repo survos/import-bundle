@@ -3,6 +3,16 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
+use function array_filter;
+use function array_slice;
+use function array_values;
+use function explode;
+use function preg_replace;
+use function str_replace;
+use function strtolower;
+use function trim;
+use function ucfirst;
+
 /**
  * Heuristic value normalizer for rows coming from CSV / JSON.
  *
@@ -21,22 +31,29 @@ final class RowNormalizer
      */
     public function normalizeRow(array $row): array
     {
+        $normalized = [];
+
         foreach ($row as $key => $value) {
+            $key = $this->normalizeKey((string) $key);
+
             // Only normalize scalars; leave arrays/objects alone.
             if (!\is_scalar($value)) {
+                $normalized[$key] = $value;
                 continue;
             }
 
             // We only care to transform strings; ints/floats/bools can pass through.
             if (!\is_string($value)) {
+                $normalized[$key] = $value;
                 continue;
             }
 
-            $trim = \trim($value);
+            $trim = trim($value);
 
             // Empty => null
             if ($trim === '') {
                 $row[$key] = null;
+                $normalized[$key] = null;
                 continue;
             }
 
@@ -47,36 +64,36 @@ final class RowNormalizer
                     $parts     = \array_map('trim', \explode($delimiter, $trim));
                     $parts     = \array_values(\array_filter($parts, static fn($p) => $p !== ''));
 
-                    $row[$key] = $parts;
+                    $normalized[$key] = $parts;
                     continue;
                 }
             }
 
-            $lower = \strtolower($trim);
+            $lower = strtolower($trim);
 
             // Booleans
             if ($lower === 'true' || $lower === 'false') {
-                $row[$key] = ($lower === 'true');
+                $normalized[$key] = ($lower === 'true');
                 continue;
             }
 
             // Integer
             if (\preg_match('/^-?\d+$/', $trim) === 1) {
-                $row[$key] = (int) $trim;
+                $normalized[$key] = (int) $trim;
                 continue;
             }
 
             // Float
             if (\preg_match('/^-?\d+\.\d+$/', $trim) === 1) {
-                $row[$key] = (float) $trim;
+                $normalized[$key] = (float) $trim;
                 continue;
             }
 
             // Fallback: trimmed string
-            $row[$key] = $trim;
+            $normalized[$key] = $trim;
         }
 
-        return $row;
+        return $normalized;
     }
 
     private function isMultiValueFieldName(string $key): bool
@@ -103,5 +120,33 @@ final class RowNormalizer
         // Generic heuristic: plural-ish name.
         // We intentionally do NOT do anything if there is no comma/pipe in the value.
         return \str_ends_with($key, 's');
+    }
+
+    private function normalizeKey(string $key): string
+    {
+        $key = trim($key);
+        if ($key === '') {
+            return $key;
+        }
+
+        $key = str_replace(['-', '_', '.', '/'], ' ', $key);
+        $key = preg_replace('/[^a-zA-Z0-9 ]+/', ' ', $key) ?? $key;
+        $key = trim($key);
+        if ($key === '') {
+            return '';
+        }
+
+        $parts = array_values(array_filter(explode(' ', $key), static fn(string $p) => $p !== ''));
+        if ($parts === []) {
+            return '';
+        }
+
+        $first = strtolower($parts[0]);
+        $rest = '';
+        foreach (array_slice($parts, 1) as $part) {
+            $rest .= ucfirst(strtolower($part));
+        }
+
+        return $first . $rest;
     }
 }
