@@ -7,9 +7,12 @@ use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
 use Survos\ImportBundle\Event\ImportConvertStartedEvent;
+use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\Provider\ProviderContext;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
 use Survos\ImportBundle\Service\RowNormalizer;
+use League\Csv\Reader as CsvReader;
+use Survos\ImportBundle\IO\CsvWriter;
 use Survos\JsonlBundle\IO\JsonlReader;
 use Survos\JsonlBundle\IO\JsonlWriter;
 use Survos\JsonlBundle\Service\JsonlProfilerInterface;
@@ -20,19 +23,22 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+use RuntimeException;
 
 use function array_filter;
 use function array_values;
 use function explode;
+use function in_array;
 use function ltrim;
 use function preg_match;
 use function realpath;
 use function rtrim;
+use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
 
-#[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL and generate a profile')]
+#[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
 final class ImportConvertCommand
 {
     /** @var array<string,string> normalizedName => originalHeader */
@@ -45,6 +51,7 @@ final class ImportConvertCommand
         private readonly JsonlProfilerInterface $profiler,
         private readonly RowProviderRegistry $rowProviders,
         private readonly RowNormalizer $rowNormalizer,
+        private readonly CsvProfileExporter $csvExporter,
         private readonly string $dataDir,
         private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
@@ -82,6 +89,9 @@ final class ImportConvertCommand
             'Apply transforms from a prior profile.json (second pass). Pass a profile path explicitly to apply it.'
         )]
         ?string $applyProfile = null,
+
+        #[Option('Output in CSV format instead of JSONL')]
+        bool $csv = false,
     ): int {
         $io->title('Import / Convert');
 
@@ -144,13 +154,18 @@ final class ImportConvertCommand
             $paths = $this->pathsFactory->for($dataset);
         }
 
-        $jsonlPath = $output ?? (
+        $outputPath = $output ?? (
             $paths ? $paths->normalizedObjectPath : $this->defaultJsonlPath((string) $dataset)
         );
 
+        // Adjust output extension for CSV mode
+        if ($csv) {
+            $outputPath = $this->adjustExtensionForCsv($outputPath);
+        }
+
         $profilePath = $paths
             ? $paths->profileObjectPath()
-            : $this->defaultProfilePath($jsonlPath);
+            : $this->defaultProfilePath($outputPath);
 
         // Resolve --apply-profile:
         //  - not provided => no transforms
@@ -180,7 +195,7 @@ final class ImportConvertCommand
             $this->dispatcher->dispatch(
                 new ImportConvertStartedEvent(
                     $input,
-                    $jsonlPath,
+                    $outputPath,
                     $profilePath,
                     $dataset,
                     $baseTags,
@@ -194,15 +209,24 @@ final class ImportConvertCommand
         // Profile-only mode: treat input as JSONL and skip conversion
         if ($profileOnly) {
             $io->note('Profile-only mode; input is treated as JSONL.');
-            $jsonlPath = $sourceInput;
+            $outputPath = $sourceInput;
         } else {
             // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
-            $this->resetJsonlOutput($jsonlPath);
-            $this->ensureDir($jsonlPath);
+            $this->resetOutput($outputPath);
+            $this->ensureDir($outputPath);
 
-            $writer = JsonlWriter::open($jsonlPath);
+            $io->section(\sprintf('Converting %s to %s (from %s)', $sourceExt, $csv ? 'CSV' : 'JSONL', $sourceInput));
 
-            $io->section(\sprintf('Converting %s to JSONL (from %s)', $sourceExt, $sourceInput));
+            if ($csv) {
+                $writer = CsvWriter::open($outputPath);
+                
+                // For CSV input, preserve original header order by writing headers from source
+                if ($sourceExt === 'csv') {
+                    $writer->writeHeadersFromSourceFile($sourceInput);
+                }
+            } else {
+                $writer = JsonlWriter::open($outputPath);
+            }
 
             $ctx = (new ProviderContext(io: $io, rootKey: $rootKey))
                 ->withOnHeader(function (string $normalized, string $original): void {
@@ -238,12 +262,12 @@ final class ImportConvertCommand
             }
 
             $writer->close();
-            $io->success(\sprintf('Converted %d records to %s', $count, $jsonlPath));
+            $io->success(\sprintf('Converted %d records to %s', $count, $outputPath));
         }
 
         // Profiling
-        $io->section('Profiling JSONL');
-        [$fieldsProfile, $recordCount, $uniqueFields, $samples] = $this->buildProfile($jsonlPath, $limit);
+        $io->section(\sprintf('Profiling %s', $csv ? 'CSV' : 'JSONL'));
+        [$fieldsProfile, $recordCount, $uniqueFields, $samples] = $this->buildProfile($outputPath, $limit);
 
         // Inject original header name if we know it
         foreach ($fieldsProfile as $name => &$stats) {
@@ -265,7 +289,7 @@ final class ImportConvertCommand
 
         $fullProfile = [
             'input'        => $input,
-            'output'       => $jsonlPath,
+            'output'       => $outputPath,
             'recordCount'  => $recordCount,
             'tags'         => $tags,
             'dataset'      => $dataset,
@@ -281,15 +305,37 @@ final class ImportConvertCommand
         );
         $io->success(\sprintf('Profile written to %s', $profilePath));
 
+        $dispatchTags = $tags;
+        if (in_array('export:csv', $tags, true) || in_array('export.csv', $tags, true)) {
+            try {
+                $result = $this->csvExporter->exportFromProfile(
+                    $profilePath,
+                    $outputPath,
+                    null,
+                    $limit
+                );
+            } catch (RuntimeException $e) {
+                $io->error($e->getMessage());
+                return Command::FAILURE;
+            }
+
+            $io->note(sprintf('CSV export wrote %d rows to %s', $result['recordCount'], $result['outputPath']));
+
+            $dispatchTags = array_values(array_filter(
+                $dispatchTags,
+                static fn(string $tag): bool => !in_array($tag, ['export:csv', 'export.csv'], true)
+            ));
+        }
+
         if ($this->dispatcher) {
             $this->dispatcher->dispatch(
                 new ImportConvertFinishedEvent(
                     $input,
-                    $jsonlPath,
+                    $outputPath,
                     $profilePath,
                     $recordCount,
                     $dataset,
-                    $tags,
+                    $dispatchTags,
                     $limit,
                     $zipPath,
                     $rootKey
@@ -367,7 +413,7 @@ final class ImportConvertCommand
         }
     }
 
-    private function resetJsonlOutput(string $output): void
+    private function resetOutput(string $output): void
     {
         if (\is_file($output)) {
             \unlink($output);
@@ -390,6 +436,31 @@ final class ImportConvertCommand
         $parts = \array_map('trim', \explode(',', $tagsOption));
         $parts = \array_filter($parts, static fn($t) => $t !== '');
         return \array_values(\array_unique($parts));
+    }
+
+    private function adjustExtensionForCsv(string $path): string
+    {
+        // Handle .gz compression
+        $isCompressed = str_ends_with($path, '.gz');
+        if ($isCompressed) {
+            $path = substr($path, 0, -3);
+        }
+
+        // Replace .jsonl or .json with .csv
+        if (str_ends_with($path, '.jsonl')) {
+            $path = substr($path, 0, -6) . '.csv';
+        } elseif (str_ends_with($path, '.json')) {
+            $path = substr($path, 0, -5) . '.csv';
+        } elseif (!str_ends_with($path, '.csv')) {
+            $path .= '.csv';
+        }
+
+        // Add back .gz if it was compressed
+        if ($isCompressed) {
+            $path .= '.gz';
+        }
+
+        return $path;
     }
 
     private function normalizeInput(string $input, string $ext, ?string $zipPath, SymfonyStyle $io): array
@@ -612,7 +683,7 @@ final class ImportConvertCommand
     }
 
     /**
-     * Build field profile + PK candidates + samples from a JSONL file.
+     * Build field profile + PK candidates + samples from a JSONL or CSV file.
      *
      * @return array{
      *   0: array<string,mixed>,
@@ -621,17 +692,34 @@ final class ImportConvertCommand
      *   3: array{top:array<int,mixed>,bottom:array<int,mixed>}
      * }
      */
-    private function buildProfile(string $jsonlPath, ?int $limit): array
+    private function buildProfile(string $filePath, ?int $limit): array
     {
-        $reader = JsonlReader::open($jsonlPath);
-        $rows   = [];
-        $count  = 0;
+        $rows  = [];
+        $count = 0;
 
-        foreach ($reader as $row) {
-            $rows[] = $row;
-            $count++;
-            if ($limit !== null && $count >= $limit) {
-                break;
+        // Determine file type and read accordingly
+        if (str_ends_with($filePath, '.csv')) {
+            $csv = CsvReader::from($filePath);
+            $csv->setHeaderOffset(0);
+            foreach ($csv->getRecords() as $record) {
+                if (!\is_array($record)) {
+                    continue;
+                }
+                $rows[] = $record;
+                $count++;
+                if ($limit !== null && $count >= $limit) {
+                    break;
+                }
+            }
+        } else {
+            // JSONL
+            $reader = JsonlReader::open($filePath);
+            foreach ($reader as $row) {
+                $rows[] = $row;
+                $count++;
+                if ($limit !== null && $count >= $limit) {
+                    break;
+                }
             }
         }
 

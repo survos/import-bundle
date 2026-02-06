@@ -6,9 +6,12 @@ namespace Survos\ImportBundle;
 use Survos\ImportBundle\Command\ImportBrowseCommand;
 use Survos\ImportBundle\Command\ImportConvertCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
+use Survos\ImportBundle\Command\ImportExportCsvCommand;
 use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
+use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
 use Survos\ImportBundle\Service\EntityClassResolver;
+use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Survos\ImportBundle\Service\Provider\RowProviderInterface;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
@@ -65,6 +68,12 @@ class SurvosImportBundle extends AbstractBundle
             ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
 
+        $builder->autowire(ImportExportCsvCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->setArgument('$dataDir', $config['dir'])
+            ->addTag('console.command');
+
         $builder->autowire(ImportBrowseCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
@@ -74,6 +83,14 @@ class SurvosImportBundle extends AbstractBundle
             ->setPublic(true)
             ->setAutoconfigured(true)
             ->addTag('console.command');
+
+        $builder->autowire(CsvProfileExporter::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(ExportCsvOnConvertFinishedListener::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
 
         // Register adapter for data-bundle integration if data-bundle is available
         if (class_exists(\Museado\DataBundle\Service\DataPaths::class)) {
