@@ -11,15 +11,14 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Survos\JsonlBundle\IO\JsonlWriter;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Stopwatch\Stopwatch;
+use Symfony\Component\String\Slugger\SluggerInterface;
 use ZipArchive;
 
 use function json_encode;
 use function sprintf;
-use function fopen;
-use function fwrite;
-use function fclose;
 use function array_map;
 use function explode;
 use function implode;
@@ -60,6 +59,10 @@ use function ltrim;
 #[AsCommand('import:filesystem', 'Scan local filesystem directories and output JSONL for processing')]
 final class ImportFilesystemCommand
 {
+    public function __construct(
+        private readonly SluggerInterface $slugger,
+    ) {}
+
     public function __invoke(
         SymfonyStyle $io,
         #[Argument('Directory path to scan')]
@@ -71,11 +74,17 @@ final class ImportFilesystemCommand
         #[Option('File extensions to include (comma-separated)')]
         ?string $extensions = null,
 
+        #[Option('File extensions to exclude (comma-separated)')]
+        ?string $excludeExtensions = null,
+
+        #[Option('Always emit a directory row for every unique parent dir, even when filtered by extension')]
+        ?bool $tree = null,
+
         #[Option('Directories to exclude (comma-separated)')]
         ?string $excludeDirs = null,
 
         #[Option('Probe level: 0=fast path, 1=stat/mime/checksum, 2=deep (ffprobe/docx), 3=audio fingerprint (chromaprint)')]
-        int $probe = 1,
+        int $probe = 0,
 
         #[Option('Audio fingerprint similarity threshold (0.0 - 1.0)')]
         float $audioSimilarity = 0.90,
@@ -92,6 +101,8 @@ final class ImportFilesystemCommand
         #[Option('Root path override for this scan')]
         ?string $rootPath = null,
     ): int {
+
+        $tree ??= true;
         if ($probe < 0 || $probe > 3) {
             $io->error('Probe level must be 0, 1, 2, or 3.');
             return Command::FAILURE;
@@ -117,12 +128,21 @@ final class ImportFilesystemCommand
         $rootPath ??= $directory;
         $rootPathReal = realpath($rootPath) ?: $rootPath;
 
-        // Parse extensions filter
+        // Parse extensions include filter
         $allowedExtensions = [];
         if ($extensions !== null) {
             $allowedExtensions = array_map(
                 static fn(string $ext): string => strtolower(trim($ext)),
                 explode(',', $extensions)
+            );
+        }
+
+        // Parse extensions exclusion filter
+        $excludedExtensions = [];
+        if ($excludeExtensions !== null) {
+            $excludedExtensions = array_map(
+                static fn(string $ext): string => strtolower(trim($ext)),
+                explode(',', $excludeExtensions)
             );
         }
 
@@ -138,6 +158,9 @@ final class ImportFilesystemCommand
         $io->title(sprintf('Scanning directory: %s', $directory));
         if (!empty($allowedExtensions)) {
             $io->note(sprintf('Filtering extensions: %s', implode(', ', $allowedExtensions)));
+        }
+        if (!empty($excludedExtensions)) {
+            $io->note(sprintf('Excluding extensions: %s', implode(', ', $excludedExtensions)));
         }
         if (!empty($excludedDirectories)) {
             $io->note(sprintf('Excluding directories: %s', implode(', ', $excludedDirectories)));
@@ -157,12 +180,22 @@ final class ImportFilesystemCommand
             $io->warning('xxh3 is not available; checksum_xxh3 will be omitted.');
         }
 
-        // Open output file for streaming
-        $fh = fopen($output, 'w');
-        if ($fh === false) {
-            $io->error(sprintf('Cannot open output file: %s', $output));
-            return Command::FAILURE;
+        $finder = new Finder();
+        $idx = 0;
+        $writer = JsonlWriter::open($output);
+        // special record for root?
+//        $writer->write(['id' => $rootId, 'type' => 'root', 'path' => $rootPath, 'relative_path' => '']);
+
+        foreach ($finder->in($directory) as $realPath => $file) {
+            dd($file);
+            $id = hash('xxh3', $file->getRelativePathname());
+            if ($file->isDir()) {
+
+            }
+            $io->writeln(sprintf('Found %s: %s', $file->isDir() ? 'dir' : 'file', $file->getRelativePathname()));
+            ($idx++ > 10) && dd();
         }
+
 
         $buckets = [];
         if ($progressMode === 'buckets') {
@@ -190,6 +223,9 @@ final class ImportFilesystemCommand
             if (!empty($allowedExtensions)) {
                 $rootFinder->name(sprintf('/\.(%s)$/i', implode('|', $allowedExtensions)));
             }
+            if (!empty($excludedExtensions)) {
+                $rootFinder->notName(sprintf('/\.(%s)$/i', implode('|', $excludedExtensions)));
+            }
             $buckets[] = ['label' => $directory, 'finder' => $rootFinder];
 
             foreach ($topLevelDirectories as $topLevelDirectory) {
@@ -202,6 +238,9 @@ final class ImportFilesystemCommand
                 if (!empty($allowedExtensions)) {
                     $bucketFinder->name(sprintf('/\.(%s)$/i', implode('|', $allowedExtensions)));
                 }
+                if (!empty($excludedExtensions)) {
+                    $bucketFinder->notName(sprintf('/\.(%s)$/i', implode('|', $excludedExtensions)));
+                }
                 $buckets[] = ['label' => $topLevelDirectory, 'finder' => $bucketFinder];
             }
         } else {
@@ -213,6 +252,9 @@ final class ImportFilesystemCommand
             }
             if (!empty($allowedExtensions)) {
                 $finder->name(sprintf('/\.(%s)$/i', implode('|', $allowedExtensions)));
+            }
+            if (!empty($excludedExtensions)) {
+                $finder->notName(sprintf('/\.(%s)$/i', implode('|', $excludedExtensions)));
             }
             $buckets[] = ['label' => $directory, 'finder' => $finder];
         }
@@ -250,8 +292,21 @@ final class ImportFilesystemCommand
             foreach ($finder as $file) {
                 $filepath = $file->getPathname();
                 $relativePath = $this->relativeToRoot($filepath, $rootPathReal, $file->getRelativePathname());
-            
+
             $id = $xxh3Available ? hash('xxh3', $relativePath) : sha1($relativePath);
+
+            $tags = $this->parentDirTags($relativePath);
+            $sluggedTags = array_map($this->slugify(...), $tags);
+            $sluggedRootId = $this->slugify($rootId);
+
+            // Pre-compute deterministic instance IDs so importers can build
+            // the tree without DB round-trips or flush ordering concerns.
+            $instanceSlug = $sluggedRootId . ($sluggedTags !== [] ? '/' . implode('/', $sluggedTags) : '');
+            $instanceId   = hash('xxh3', $instanceSlug);
+
+            $parentSluggedTags  = array_slice($sluggedTags, 0, -1);
+            $parentInstanceSlug = $sluggedRootId . ($parentSluggedTags !== [] ? '/' . implode('/', $parentSluggedTags) : '');
+            $parentInstanceId   = $sluggedTags !== [] ? hash('xxh3', $parentInstanceSlug) : null;
 
             $metadata = [
                 'id' => $id,
@@ -263,7 +318,11 @@ final class ImportFilesystemCommand
                 'basename' => basename($filepath),
                 'dirname' => dirname($filepath),
                 'extension' => strtolower(pathinfo($filepath, PATHINFO_EXTENSION)),
-                'tags' => $this->parentDirTags($relativePath),
+                'tags' => $tags,
+                'instance_slug' => $instanceSlug,
+                'instance_id' => $instanceId,
+                'parent_instance_slug' => $parentInstanceSlug,
+                'parent_instance_id' => $parentInstanceId,
                 'probe_level' => $probe,
             ];
 
@@ -339,14 +398,7 @@ final class ImportFilesystemCommand
                 }
             }
 
-            $jsonLine = json_encode($metadata) . "\n";
-            $bytesWritten = fwrite($fh, $jsonLine);
-            
-            if ($bytesWritten === false) {
-                $io->error(sprintf('Failed writing to output file: %s', $output));
-                fclose($fh);
-                return Command::FAILURE;
-            }
+            $writer->write($metadata);
 
                 $count++;
                 if ($progressMode === 'indeterminate' && $progressBar !== null) {
@@ -374,11 +426,54 @@ final class ImportFilesystemCommand
             $io->newLine();
         }
 
+        // ── Tree pass: emit a directory row for every unique subdirectory ──
+        if ($tree) {
+            $sluggedRootId = $this->slugify($rootId);
+            $seenDirs = [];
+            $dirFinder = new Finder();
+            $dirFinder->directories()->in($directory);
+            $dirFinder->ignoreDotFiles(!$includeHidden);
+            foreach ($excludedDirectories as $excludeDir) {
+                $dirFinder->notPath($excludeDir);
+            }
+            foreach ($dirFinder as $dir) {
+                $relativePath = $this->relativeToRoot($dir->getPathname(), $rootPathReal, $dir->getRelativePathname());
+                if (isset($seenDirs[$relativePath])) {
+                    continue;
+                }
+                $seenDirs[$relativePath] = true;
+
+                $tags        = array_values(array_filter(explode('/', $relativePath), static fn(string $p) => $p !== ''));
+                $sluggedTags = array_map($this->slugify(...), $tags);
+
+                $instanceSlug = $sluggedRootId . '/' . implode('/', $sluggedTags);
+                $instanceId   = hash('xxh3', $instanceSlug);
+
+                $parentSluggedTags  = array_slice($sluggedTags, 0, -1);
+                $parentInstanceSlug = $sluggedRootId . ($parentSluggedTags !== [] ? '/' . implode('/', $parentSluggedTags) : '');
+                $parentInstanceId   = hash('xxh3', $parentInstanceSlug);
+
+                $writer->write([
+                    'id'                  => hash('xxh3', $relativePath),
+                    'type'                => 'directory',
+                    'root_id'             => $rootId,
+                    'root_path'           => $rootPath,
+                    'path'                => $dir->getPathname(),
+                    'relative_path'       => $relativePath,
+                    'tags'                => $tags,
+                    'instance_slug'       => $instanceSlug,
+                    'instance_id'         => $instanceId,
+                    'parent_instance_slug' => $parentInstanceSlug,
+                    'parent_instance_id'  => $parentInstanceId,
+                ], $instanceId);
+            }
+        }
+
         $overallEvent = $stopwatch->stop($overallEventName);
         $seconds = $overallEvent->getDuration() / 1000;
         $filesPerSecond = $seconds > 0.0 ? $count / $seconds : 0.0;
         $mbPerSecond = $seconds > 0.0 ? ($totalSize / 1024 / 1024) / $seconds : 0.0;
-        fclose($fh);
+        $writer->finish();
 
         $io->section('Summary');
         $io->text(sprintf('Files: %d', $count));
@@ -649,6 +744,11 @@ final class ImportFilesystemCommand
         }
 
         return array_values(array_filter(explode('/', $relativeDir), static fn(string $p) => $p !== ''));
+    }
+
+    private function slugify(string $value): string
+    {
+        return strtolower($this->slugger->slug($value)->toString());
     }
 
     private function relativeToRoot(string $filePath, string $rootPath, string $fallback): string

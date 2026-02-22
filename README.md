@@ -38,8 +38,9 @@ You can also use it in a simpler “direct CSV → Entity → Import” mode for
 6. [Complete Demo App with EasyAdmin](#complete-demo-app-with-easyadmin)
 7. [Castor Automation](#castor-automation)
 8. [Events & Extensibility](#events--extensibility)
-9. [Tips & Gotchas](#tips--gotchas)
-10. [See Also](#see-also)
+9. [Filesystem Indexing (`import:dir`)](#filesystem-indexing-importdir)
+10. [Tips & Gotchas](#tips--gotchas)
+11. [See Also](#see-also)
 
 ---
 
@@ -456,6 +457,18 @@ private function saveBase64Image(string $base64String, string $outputPath): bool
 ```
 
 This pattern—**listen to events and mutate `$event->row`**—is the recommended way to inject domain-specific logic into a generic import pipeline without forking the bundle.
+
+---
+
+## Filesystem Indexing (`import:dir`)
+
+Use `import:dir` when the source of truth is a directory tree and your pipeline needs reusable filesystem/probe metadata.
+
+- Emits linked `DIR` + `FILE` JSONL DTO rows with deterministic `id` and `parent_id`
+- Lets listeners enrich rows with domain metadata (family tags, OCR text, AI outputs)
+- Attaches probe/sidecar information once so downstream workflows do not repeat expensive extraction
+
+See `docs/import-dir.md` for full options, DTO schema, and deserialize examples.
 
 ---
 

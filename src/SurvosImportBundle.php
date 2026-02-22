@@ -1,18 +1,22 @@
 <?php
+declare(strict_types=1);
 /** generated from /home/tac/g/sites/survos/vendor/survos/maker-bundle/templates/skeleton/bundle/src/Bundle.tpl.php */
 
 namespace Survos\ImportBundle;
 
 use Survos\ImportBundle\Command\ImportBrowseCommand;
 use Survos\ImportBundle\Command\ImportConvertCommand;
+use Survos\ImportBundle\Command\ImportDirCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
 use Survos\ImportBundle\Command\ImportExportCsvCommand;
 use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
 use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
+use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\LooseObjectMapper;
+use Survos\ImportBundle\Service\ProbeService;
 use Survos\ImportBundle\Service\Provider\RowProviderInterface;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
 use Survos\ImportBundle\Service\RowNormalizer;
@@ -84,11 +88,24 @@ class SurvosImportBundle extends AbstractBundle
             ->setAutoconfigured(true)
             ->addTag('console.command');
 
+        $builder->autowire(ImportDirCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->addTag('console.command');
+
+        $builder->autowire(ProbeService::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
         $builder->autowire(CsvProfileExporter::class)
             ->setPublic(true)
             ->setAutoconfigured(true);
 
         $builder->autowire(ExportCsvOnConvertFinishedListener::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(SampleImportDirEnrichmentListener::class)
             ->setPublic(true)
             ->setAutoconfigured(true);
 
