@@ -280,7 +280,20 @@ final class ProbeService
             return null;
         }
 
-        $mimeType = finfo_file($finfo, $filepath);
+        try {
+            set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
+                error_log(sprintf('Warning: finfo_file error for %s: %s', $filepath, $errstr));
+                return true;
+            });
+            $mimeType = finfo_file($finfo, $filepath);
+            restore_error_handler();
+        } catch (\Throwable $e) {
+            restore_error_handler();
+            finfo_close($finfo);
+            error_log(sprintf('Warning: finfo_file exception for %s: %s', $filepath, $e->getMessage()));
+            return null;
+        }
+
         finfo_close($finfo);
 
         if (!is_string($mimeType) || trim($mimeType) === '') {
@@ -292,20 +305,38 @@ final class ProbeService
 
     private function computeXxh3Checksum(string $filepath): ?string
     {
-        $hash = hash_init('xxh3');
-        $fh = fopen($filepath, 'rb');
-        if (!is_resource($fh)) {
+        try {
+            $hash = hash_init('xxh3');
+
+            set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
+                error_log(sprintf('Warning: fopen error for %s: %s', $filepath, $errstr));
+                return true;
+            });
+            $fh = fopen($filepath, 'rb');
+            restore_error_handler();
+
+            if (!is_resource($fh)) {
+                return null;
+            }
+
+            set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
+                error_log(sprintf('Warning: hash_update_stream error for %s: %s', $filepath, $errstr));
+                return true;
+            });
+            $updated = hash_update_stream($hash, $fh);
+            restore_error_handler();
+
+            fclose($fh);
+
+            if ($updated === false) {
+                return null;
+            }
+
+            return hash_final($hash);
+        } catch (\Throwable $e) {
+            error_log(sprintf('Warning: computeXxh3Checksum exception for %s: %s', $filepath, $e->getMessage()));
             return null;
         }
-
-        $updated = hash_update_stream($hash, $fh);
-        fclose($fh);
-
-        if ($updated === false) {
-            return null;
-        }
-
-        return hash_final($hash);
     }
 
     /**

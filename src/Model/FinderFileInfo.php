@@ -33,7 +33,30 @@ final class FinderFileInfo
     public static function fromSplFileInfo(SplFileInfo $file, string $relativePathname): self
     {
         $isDir = $file->isDir();
-        $size = $isDir ? null : $file->getSize();
+        $size = null;
+        if (!$isDir) {
+            try {
+                $size = $file->getSize();
+            } catch (\Throwable $e) {
+                // File has I/O error - log to stderr but continue
+                error_log(sprintf('Warning: getSize() failed for %s: %s', $file->getPathname(), $e->getMessage()));
+                $size = null;
+            }
+        }
+
+        // Try to get timestamps, but handle I/O errors gracefully
+        $createdTime = null;
+        $modifiedTime = null;
+        try {
+            $createdTime = $file->getCTime();
+        } catch (\Throwable $e) {
+            error_log(sprintf('Warning: getCTime() failed for %s: %s', $file->getPathname(), $e->getMessage()));
+        }
+        try {
+            $modifiedTime = $file->getMTime();
+        } catch (\Throwable $e) {
+            error_log(sprintf('Warning: getMTime() failed for %s: %s', $file->getPathname(), $e->getMessage()));
+        }
 
         return new self(
             pathname: $file->getPathname(),
@@ -46,8 +69,8 @@ final class FinderFileInfo
             isReadable: $file->isReadable(),
             isDir: $isDir,
             size: $size,
-            createdTime: $file->getCTime(),
-            modifiedTime: $file->getMTime(),
+            createdTime: $createdTime,
+            modifiedTime: $modifiedTime,
         );
     }
 
