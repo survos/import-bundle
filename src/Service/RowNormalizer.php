@@ -129,6 +129,19 @@ final class RowNormalizer
             return $key;
         }
 
+        // If the key is already camelCase (contains no separators and has an
+        // interior uppercase letter), leave it unchanged — it was already
+        // normalized upstream (e.g. by CsvRowProvider::normalizeHeaderName).
+        if (
+            !str_contains($key, '_')
+            && !str_contains($key, '-')
+            && !str_contains($key, '.')
+            && !str_contains($key, ' ')
+            && preg_match('/[a-z][A-Z]/', $key)
+        ) {
+            return $key;
+        }
+
         $key = str_replace(['-', '_', '.', '/'], ' ', $key);
         $key = preg_replace('/[^a-zA-Z0-9 ]+/', ' ', $key) ?? $key;
         $key = trim($key);

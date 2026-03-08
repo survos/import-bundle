@@ -105,7 +105,8 @@ final class LooseObjectMapper
 
             // Try alternative acronym property if not writable (Id → ID, Url → URL, etc.)
             if (!$writable) {
-                $altProp = $this->resolveAcronymProperty($object, $prop, $debug);
+                $altProp = $this->resolveAcronymProperty($object, $prop, $debug)
+                    ?? $this->resolveByCanonical($object, $snakeKey, $debug);
 
                 if ($altProp === null) {
                     $this->debug('No writable property found, skipping field', $debug, [
@@ -569,6 +570,33 @@ final class LooseObjectMapper
         // "Identification.ID"             → "identificationid"
         // "Engine Information.Driveline"  → "engineinformationdriveline"
         return preg_replace('/[^a-z0-9]+/', '', strtolower($key)) ?: '';
+    }
+
+    /**
+     * Canonical reverse lookup: find the actual property name on $object whose
+     * canonical form (all lowercase, non-alphanumeric stripped) matches $snakeKey.
+     * Handles all-lowercase JSONL keys like "dimensionsheight" → "dimensionsHeight".
+     */
+    private function resolveByCanonical(object $object, string $snakeKey, bool $debug): ?string
+    {
+        $targetCanonical = $this->canonicalKey($snakeKey);
+        if ($targetCanonical === '') {
+            return null;
+        }
+
+        foreach ((new \ReflectionClass($object))->getProperties() as $rp) {
+            if ($this->canonicalKey($rp->getName()) === $targetCanonical
+                && $this->pa->isWritable($object, $rp->getName())) {
+                $this->debug('resolveByCanonical() hit', $debug, [
+                    'snake_key' => $snakeKey,
+                    'prop'      => $rp->getName(),
+                    'canonical' => $targetCanonical,
+                ]);
+                return $rp->getName();
+            }
+        }
+
+        return null;
     }
 
     /**
