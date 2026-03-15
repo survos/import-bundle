@@ -15,6 +15,7 @@ use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
 use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\CsvProfileExporter;
+use Survos\ImportBundle\Service\DtoMapper;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Survos\ImportBundle\Service\ProbeService;
 use Survos\ImportBundle\Service\Provider\RowProviderInterface;
@@ -123,8 +124,11 @@ class SurvosImportBundle extends AbstractBundle
 
         $builder->autowire(LooseObjectMapper::class)
             ->setPublic(true)
-            ->setAutoconfigured(true)
-            ;
+            ->setAutoconfigured(true);
+
+        $builder->autowire(DtoMapper::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
 
 
     }
