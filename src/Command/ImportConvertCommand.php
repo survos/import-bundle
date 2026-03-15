@@ -282,7 +282,9 @@ final class ImportConvertCommand
 
         if ($uniqueFields) {
             $io->note('PK-like unique fields: ' . \implode(', ', $uniqueFields));
-        } else {
+        } elseif ($recordCount > 0) {
+            // Only warn about missing PK when there are actually records to index.
+            // 0-record collections are expected (e.g. all items filtered by rights).
             $io->warning('No PK-like unique field detected (non-null, allowed chars, no duplicates).');
             $io->writeln('  → You may need to fix the profile logic or provide a separate id field.');
         }
