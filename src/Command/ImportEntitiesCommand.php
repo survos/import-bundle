@@ -7,10 +7,13 @@ namespace Survos\ImportBundle\Command;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\Mapping\MappingException;
-use League\Csv\Reader as CsvReader;
 use JsonMachine\Items;
+use League\Csv\Reader as CsvReader;
 use Survos\CoreBundle\Service\EntityClassResolver;
-// is this best?
+use Survos\ImportBundle\Event\ImportEntitiesFinishedEvent;
+use Survos\ImportBundle\Event\ImportEntityMappedEvent;
+use Survos\ImportBundle\Event\ImportEntityPersistedEvent;
+use Survos\ImportBundle\Event\ImportEntityRowEvent;
 use Survos\JsonlBundle\IO\JsonlReader as SurvosJsonlReader;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Symfony\Component\Console\Attribute\Argument;
@@ -19,8 +22,8 @@ use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 #[AsCommand('import:entities', 'Import records from a CSV/TSV/JSON/JSONL into a Doctrine entity')]
 final class ImportEntitiesCommand
@@ -31,6 +34,7 @@ final class ImportEntitiesCommand
         private readonly EntityClassResolver $resolver,
         private ?EntityManagerInterface $em = null,
         private ?ValidatorInterface $validator = null,
+        private readonly ?EventDispatcherInterface $dispatcher = null,
 
     ) {
     }
@@ -55,6 +59,10 @@ final class ImportEntitiesCommand
         ?bool $validate = null,
         #[Option(description: 'no id, use auto-increment', name: 'auto')]
         bool $idIsLineNumber = false,
+        #[Option('Dataset key for import listeners')]
+        ?string $dataset = null,
+        #[Option('Tenant id/code for import listeners')]
+        ?string $tenant = null,
     ): int {
         if (!$this->em) {
             $io->error("composer req doctrine/orm");
@@ -104,6 +112,12 @@ final class ImportEntitiesCommand
 
         $i = 0;
         foreach ($this->iterateFile($file) as $idx => $row) {
+            if ($this->dispatcher) {
+                $rowEvent = new ImportEntityRowEvent($row, $entityClass, $dataset, $tenant, $file);
+                $this->dispatcher->dispatch($rowEvent);
+                $row = $rowEvent->row;
+            }
+
             // coerce each value smartly
             foreach ($row as $k => $v) {
                 $row[$k] = $this->coerceValue($k, $v);
@@ -181,6 +195,11 @@ final class ImportEntitiesCommand
             // Map remaining data into entity; ignore PK
             $ignore = $pkField??false ? [$pkField] : [];
             $this->mapper->mapInto($row, $entity, ignored: $ignore);
+            if ($this->dispatcher) {
+                $mappedEvent = new ImportEntityMappedEvent($entity, $row, $entityClass, $dataset, $tenant, $file);
+                $this->dispatcher->dispatch($mappedEvent);
+                $row = $mappedEvent->row;
+            }
             if ($validate) {
                 if (!$this->validator) {
                     throw new \RuntimeException("Install symfony/validator");
@@ -199,6 +218,10 @@ final class ImportEntitiesCommand
                     }
             }
 
+            if ($this->dispatcher) {
+                $this->dispatcher->dispatch(new ImportEntityPersistedEvent($entity, $row, $entityClass, $dataset, $tenant, $file));
+            }
+
             $i++;
             if ($batch > 0 && ($i % $batch) === 0) {
                 if ($progress) {
@@ -213,6 +236,9 @@ final class ImportEntitiesCommand
         }
 
         $this->em->flush();
+        if ($this->dispatcher) {
+            $this->dispatcher->dispatch(new ImportEntitiesFinishedEvent($entityClass, $i, $dataset, $tenant, $file));
+        }
         $io->success(sprintf("%d now in $entityClass", $this->em->getRepository($entityClass)->count()));
         return Command::SUCCESS;
     }
