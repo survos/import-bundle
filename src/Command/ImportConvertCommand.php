@@ -210,6 +210,10 @@ final class ImportConvertCommand
         if ($profileOnly) {
             $io->note('Profile-only mode; input is treated as JSONL.');
             $outputPath = $sourceInput;
+            $attemptedCount = null;
+            $convertedCount = null;
+            $rejectedCount = null;
+            $limitReached = false;
         } else {
             // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
             $this->resetOutput($outputPath);
@@ -235,8 +239,12 @@ final class ImportConvertCommand
 
             $count = 0;
             $index = 0;
+            $attemptedCount = 0;
+            $rejectedCount = 0;
+            $limitReached = false;
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
+                $attemptedCount++;
                 $row = $this->rowNormalizer->normalizeRow($row);
 
                 $row = $this->applyRowCallbacks(
@@ -250,6 +258,7 @@ final class ImportConvertCommand
                 $index++;
 
                 if ($row === null) {
+                    $rejectedCount++;
                     continue;
                 }
 
@@ -257,12 +266,22 @@ final class ImportConvertCommand
                 $count++;
 
                 if ($limit !== null && $count >= $limit) {
+                    $limitReached = true;
                     break;
                 }
             }
 
+            $convertedCount = $count;
+
             $writer->close();
-            $io->success(\sprintf('Converted %d records to %s', $count, $outputPath));
+            $io->success(\sprintf(
+                'Converted %d records to %s (attempted=%d, rejected=%d%s)',
+                $convertedCount,
+                $outputPath,
+                $attemptedCount,
+                $rejectedCount,
+                $limitReached ? ', limit reached' : ''
+            ));
         }
 
         // Profiling
@@ -293,6 +312,11 @@ final class ImportConvertCommand
             'input'        => $input,
             'output'       => $outputPath,
             'recordCount'  => $recordCount,
+            'requestedLimit' => $limit,
+            'attemptedCount' => $attemptedCount,
+            'convertedCount' => $convertedCount ?? null,
+            'rejectedCount' => $rejectedCount,
+            'limitReached' => $limitReached,
             'tags'         => $tags,
             'dataset'      => $dataset,
             'uniqueFields' => $uniqueFields,
