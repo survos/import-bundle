@@ -37,6 +37,7 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
+use App\Field\CanonicalField;
 
 #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
 final class ImportConvertCommand
@@ -76,6 +77,12 @@ final class ImportConvertCommand
         #[Option('Dataset code (e.g. "wam", "marvel")')]
         ?string $dataset = null,
 
+        #[Option('Dataset stage to write/read canonically: raw or normalize', name: 'stage')]
+        string $stage = 'normalize',
+
+        #[Option('Dataset core filename stem (default: obj)', name: 'core')]
+        string $core = 'obj',
+
         #[Option('Additional tags (comma-separated, e.g. "wikidata,youtube")', name: 'tags')]
         ?string $tagsOption = null,
 
@@ -92,11 +99,30 @@ final class ImportConvertCommand
 
         #[Option('Output in CSV format instead of JSONL')]
         bool $csv = false,
+
+        #[Option('Dump raw and normalized row N and stop. Use --dump or --dump=1 for the first row.', name: 'dump')]
+        bool|int $dump = false,
     ): int {
         $io->title('Import / Convert');
 
+        $stage = strtolower(trim($stage));
+        if (!in_array($stage, ['raw', 'normalize'], true)) {
+            $io->error(sprintf('Unsupported --stage=%s. Allowed values: raw, normalize.', $stage));
+            return Command::FAILURE;
+        }
+
+        $core = trim($core);
+        if ($core === '') {
+            $io->error('The --core option cannot be empty.');
+            return Command::FAILURE;
+        }
+
         $this->fieldOriginalNames = [];
         $this->extraTags          = $this->parseExtraTags($tagsOption);
+        $dumpRecord = $this->normalizeDumpRecord($dump, $io);
+        if ($dumpRecord === -1) {
+            return Command::FAILURE;
+        }
 
         // Dataset-only invocation:
         //   bin/console import:convert --dataset=fortepan
@@ -113,10 +139,10 @@ final class ImportConvertCommand
             }
 
             $paths = $this->pathsFactory->for($dataset);
-            $input = $paths->rawObjectPath;
+            $input = $this->canonicalStagePath($paths, 'raw', $core);
 
-            // Prefer canonical normalized output unless caller provided --output
-            $output ??= $paths->normalizedObjectPath;
+            // Prefer canonical stage output unless caller provided --output
+            $output ??= $this->canonicalStagePath($paths, $stage, $core);
         }
 
         if ($input === null || $input === '') {
@@ -155,7 +181,7 @@ final class ImportConvertCommand
         }
 
         $outputPath = $output ?? (
-            $paths ? $paths->normalizedObjectPath : $this->defaultJsonlPath((string) $dataset)
+            $paths ? $this->canonicalStagePath($paths, $stage, $core) : $this->defaultJsonlPath((string) $dataset)
         );
 
         // Adjust output extension for CSV mode
@@ -164,7 +190,7 @@ final class ImportConvertCommand
         }
 
         $profilePath = $paths
-            ? $paths->profileObjectPath()
+            ? $this->canonicalProfilePath($paths, $stage, $core)
             : $this->defaultProfilePath($outputPath);
 
         // Resolve --apply-profile:
@@ -215,6 +241,20 @@ final class ImportConvertCommand
             $rejectedCount = null;
             $limitReached = false;
         } else {
+            if ($dumpRecord !== null) {
+                $io->section(sprintf('Dumping record %d from %s', $dumpRecord, $sourceInput));
+                return $this->dumpRecord(
+                    $io,
+                    $sourceInput,
+                    $sourceExt,
+                    (string) $input,
+                    $dataset,
+                    $rootKey,
+                    $applyProfilePath,
+                    $dumpRecord
+                );
+            }
+
             // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
             $this->resetOutput($outputPath);
             $this->ensureDir($outputPath);
@@ -372,6 +412,115 @@ final class ImportConvertCommand
         return Command::SUCCESS;
     }
 
+    private function normalizeDumpRecord(bool|int $dump, SymfonyStyle $io): ?int
+    {
+        if ($dump === false) {
+            return null;
+        }
+
+        if ($dump === true) {
+            return 1;
+        }
+
+        if ($dump < 1) {
+            $io->error('--dump must be a positive integer.');
+            return -1;
+        }
+
+        return $dump;
+    }
+
+    private function dumpRecord(
+        SymfonyStyle $io,
+        string $sourceInput,
+        string $sourceExt,
+        string $input,
+        ?string $dataset,
+        ?string $rootKey,
+        ?string $applyProfilePath,
+        int $dumpRecord,
+    ): int {
+        $ctx = (new ProviderContext(io: $io, rootKey: $rootKey))
+            ->withOnHeader(function (string $normalized, string $original): void {
+                $this->fieldOriginalNames[$normalized] = $original;
+            });
+
+        $attempted = 0;
+        $index = 0;
+        foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
+            $attempted++;
+            $rawRow = $this->rowNormalizer->normalizeRow($row);
+            $normalizedRow = $this->applyRowCallbacks(
+                $rawRow,
+                $input,
+                $sourceExt,
+                $dataset,
+                $index,
+                $applyProfilePath
+            );
+            $index++;
+
+            if ($attempted !== $dumpRecord) {
+                continue;
+            }
+
+            $canonicalFields = $this->canonicalFieldNames();
+            $canonical = [];
+            $other = [];
+
+            foreach (($normalizedRow ?? []) as $key => $value) {
+                if (in_array($key, $canonicalFields, true)) {
+                    $canonical[$key] = $value;
+                } else {
+                    $other[$key] = $value;
+                }
+            }
+
+            $io->section(sprintf('Raw Row #%d', $dumpRecord));
+            $io->writeln(json_encode($rawRow, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+            $io->section(sprintf('Normalized Row #%d', $dumpRecord));
+            $io->writeln(json_encode($normalizedRow, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+            $io->section('Canonical Fields');
+            $io->writeln(json_encode($canonical, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+            $io->section('Other Fields');
+            $io->writeln(json_encode($other, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+            return Command::SUCCESS;
+        }
+
+        $io->warning(sprintf('Record %d not found; attempted %d row(s).', $dumpRecord, $attempted));
+        return Command::SUCCESS;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function canonicalFieldNames(): array
+    {
+        return [
+            'sourceId',
+            CanonicalField::ID,
+            CanonicalField::TITLE,
+            CanonicalField::DESCRIPTION,
+            'type',
+            CanonicalField::RIGHTS,
+            'citation',
+            CanonicalField::CULTURE,
+            CanonicalField::TECHNIQUE,
+            CanonicalField::DEPARTMENT,
+            CanonicalField::COLLECTION,
+            CanonicalField::CITATION_URL,
+            CanonicalField::URL,
+            CanonicalField::PAGE_URL,
+            CanonicalField::IMAGE_URL,
+            CanonicalField::THUMBNAIL_URL,
+            CanonicalField::LICENSE,
+        ];
+    }
+
     private function inferDatasetFromInput(string $input): ?string
     {
         $dataRoot = rtrim($this->dataDir, '/');
@@ -403,6 +552,39 @@ final class ImportConvertCommand
         }
 
         return null;
+    }
+
+    private function canonicalStagePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
+    {
+        return match ($stage) {
+            'raw' => $this->canonicalRawInputPath($paths, $core),
+            default => rtrim($paths->normalizedDir, '/') . '/' . $core . '.jsonl',
+        };
+    }
+
+    private function canonicalRawInputPath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $core): string
+    {
+        $base = rtrim($paths->rawDir, '/') . '/' . $core . '.jsonl';
+        if (is_file($base)) {
+            return $base;
+        }
+
+        $gz = $base . '.gz';
+        if (is_file($gz)) {
+            return $gz;
+        }
+
+        return $base;
+    }
+
+    private function canonicalProfilePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
+    {
+        $basePath = $this->canonicalStagePath($paths, $stage, $core);
+        $dir = ($stage === 'raw') ? $paths->rawDir : ($paths->profileDir ?? dirname($basePath));
+        $base = basename($basePath);
+        $base = preg_replace('/\.jsonl$/i', '', $base, 1);
+
+        return sprintf('%s/%s.profile.json', $dir, $base);
     }
 
     // ------------------------------------------------------------------

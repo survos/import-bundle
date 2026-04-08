@@ -11,11 +11,18 @@ use Survos\ImportBundle\Command\ImportEntitiesCommand;
 use Survos\ImportBundle\Command\ImportExportCsvCommand;
 use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
+use Survos\ImportBundle\Compiler\FetchAwareEntityPass;
 use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
+use Survos\ImportBundle\EventListener\FetchPageCountUpdateListener;
 use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
+use Survos\ImportBundle\MessageHandler\FetchPageMessageHandler;
+use Survos\ImportBundle\Repository\FetchPageRepository;
+use Survos\ImportBundle\Repository\FetchRecordRepository;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\DtoMapper;
+use Survos\ImportBundle\Service\FetchAwareEntityRegistry;
+use Survos\ImportBundle\Service\FetchRecordExporter;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Survos\ImportBundle\Service\ProbeService;
 use Survos\ImportBundle\Service\Provider\RowProviderInterface;
@@ -29,6 +36,25 @@ use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
 
 class SurvosImportBundle extends AbstractBundle
 {
+    public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void
+    {
+        if ($builder->hasExtension('doctrine')) {
+            $builder->prependExtensionConfig('doctrine', [
+                'orm' => [
+                    'mappings' => [
+                        'SurvosImportBundle' => [
+                            'is_bundle' => false,
+                            'type' => 'attribute',
+                            'dir' => \dirname(__DIR__) . '/src/Entity',
+                            'prefix' => 'Survos\\ImportBundle\\Entity',
+                            'alias' => 'Import',
+                        ],
+                    ],
+                ],
+            ]);
+        }
+    }
+
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
 
@@ -98,6 +124,32 @@ class SurvosImportBundle extends AbstractBundle
             ->setPublic(true)
             ->setAutoconfigured(true);
 
+        $builder->autowire(FetchPageMessageHandler::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(FetchPageRepository::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->addTag('doctrine.repository_service');
+
+        $builder->autowire(FetchRecordRepository::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->addTag('doctrine.repository_service');
+
+        $builder->autowire(FetchRecordExporter::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(FetchAwareEntityRegistry::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(FetchPageCountUpdateListener::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
         $builder->autowire(CsvProfileExporter::class)
             ->setPublic(true)
             ->setAutoconfigured(true);
@@ -139,6 +191,12 @@ class SurvosImportBundle extends AbstractBundle
             ->children()
             ->scalarNode('dir')->info("The default directory for data files")->defaultValue('data')->end()
             ->end();
+    }
+
+    public function build(ContainerBuilder $container): void
+    {
+        parent::build($container);
+        $container->addCompilerPass(new FetchAwareEntityPass());
     }
 
 }
