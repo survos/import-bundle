@@ -501,7 +501,7 @@ final class ImportConvertCommand
     private function canonicalFieldNames(): array
     {
         return [
-            'sourceId',
+            CanonicalField::SOURCE_ID,
             CanonicalField::ID,
             CanonicalField::TITLE,
             CanonicalField::DESCRIPTION,
