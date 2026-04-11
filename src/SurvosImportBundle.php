@@ -163,7 +163,7 @@ class SurvosImportBundle extends AbstractBundle
             ->setAutoconfigured(true);
 
         // Register adapter for data-bundle integration if data-bundle is available
-        if (class_exists(\Museado\DataBundle\Service\DataPaths::class)) {
+        if (class_exists(\Survos\DataBundle\Service\DataPaths::class)) {
             $builder->autowire(\Survos\ImportBundle\Service\DataPathsFactoryAdapter::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true);

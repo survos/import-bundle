@@ -132,7 +132,7 @@ final class ImportConvertCommand
             if ($this->pathsFactory === null) {
                 $io->error(\sprintf(
                     'Missing <input>. You passed --dataset=%s, but no DatasetPathsFactoryInterface is registered. ' .
-                    'Enable museado/data-bundle (or provide your own factory), or pass an explicit input path.',
+                    'Enable survos/data-bundle (or provide your own factory), or pass an explicit input path.',
                     $dataset
                 ));
                 return Command::FAILURE;

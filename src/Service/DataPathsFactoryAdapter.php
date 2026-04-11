@@ -3,12 +3,12 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
-use Museado\DataBundle\Service\DataPaths;
+use Survos\DataBundle\Service\DataPaths;
 use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Model\DatasetPaths as ImportDatasetPaths;
 
 /**
- * Adapter to bridge museado/data-bundle DataPaths with import-bundle DatasetPathsFactoryInterface
+ * Adapter to bridge survos/data-bundle DataPaths with import-bundle DatasetPathsFactoryInterface
  */
 final class DataPathsFactoryAdapter implements DatasetPathsFactoryInterface
 {

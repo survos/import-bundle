@@ -31,7 +31,7 @@ final class ImportBrowseCommand
         int $limit = 10,
     ): int {
         if ($this->pathsFactory === null) {
-            $io->error('DatasetPathsFactoryInterface not registered. Enable museado/data-bundle or provide your own factory.');
+            $io->error('DatasetPathsFactoryInterface not registered. Enable survos/data-bundle or provide your own factory.');
             return Command::FAILURE;
         }
 

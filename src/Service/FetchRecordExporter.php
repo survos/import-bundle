@@ -33,7 +33,7 @@ final class FetchRecordExporter
     ): int {
         if ($this->pathsFactory === null) {
             throw new RuntimeException(sprintf(
-                'Cannot export dataset "%s": no DatasetPathsFactoryInterface is registered. Install museado/data-bundle or provide your own factory service.',
+                'Cannot export dataset "%s": no DatasetPathsFactoryInterface is registered. Install survos/data-bundle or provide your own factory service.',
                 $datasetKey
             ));
         }
