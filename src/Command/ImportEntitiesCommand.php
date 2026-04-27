@@ -7,6 +7,8 @@ namespace Survos\ImportBundle\Command;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\Mapping\MappingException;
+use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
+use Symfony\Component\PropertyAccess\PropertyAccess;
 use JsonMachine\Items;
 use League\Csv\Reader as CsvReader;
 use Survos\CoreBundle\Service\EntityClassResolver;
@@ -32,10 +34,10 @@ final class ImportEntitiesCommand
         private LooseObjectMapper $mapper,
         private string $dataDir, // injected from $config
         private readonly EntityClassResolver $resolver,
+        private readonly PropertyAccessorInterface $propertyAccessor,
         private ?EntityManagerInterface $em = null,
         private ?ValidatorInterface $validator = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
-
     ) {
     }
 
@@ -145,23 +147,18 @@ final class ImportEntitiesCommand
                         continue;
                     }
                 } else {
-                    dd(array_keys($row), $pkField, $entityClass);
+                    $io->warning(sprintf('Row %d: pk field "%s" not found in row (keys: %s) — skipping.', $idx, $pkField, implode(', ', array_keys($row))));
+                    continue;
                 }
                 assert($pkField, "No pk field found.");
                 assert($pkValue, "No pk value found for " . $pkField);
             }
 
 //            if ($pkValue) {
-            if (!$entity = $this->em->getRepository($entityClass)->find($pkValue)) {
+            if (!$entity = $this->em->getRepository($entityClass)->findOneBy([$pkField => $pkValue])) {
                 $entity = new $entityClass();
                 if (!$idIsLineNumber) {
-                    try {
-                        $entity->$pkField = $pkValue;
-                    } catch (\Exception $e) {
-                        $io->error($e->getMessage());
-                        dd($pkField, $pkValue);
-
-                    }
+                    $this->propertyAccessor->setValue($entity, $pkField, $pkValue);
                 }
                 $this->em->persist($entity);
             }

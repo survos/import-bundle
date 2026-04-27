@@ -22,6 +22,7 @@ use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 
@@ -74,6 +75,9 @@ final class ImportConvertCommand
         #[Option('Treat input as JSONL and only generate the profile')]
         bool $profileOnly = false,
 
+        #[Option('Write a .profile.json alongside the output (default: true; use --no-save-profile to skip)')]
+        ?bool $saveProfile = null,
+
         #[Option('Dataset code (e.g. "wam", "marvel")')]
         ?string $dataset = null,
 
@@ -104,6 +108,8 @@ final class ImportConvertCommand
         bool|int $dump = false,
     ): int {
         $io->title('Import / Convert');
+
+        $saveProfile ??= true;
 
         $stage = strtolower(trim($stage));
         if (!in_array($stage, ['raw', 'normalize'], true)) {
@@ -175,8 +181,10 @@ final class ImportConvertCommand
             [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
         }
 
-        // If dataset is known and a factory exists, prefer canonical output/profile defaults (unless overridden).
-        if ($paths === null && $dataset !== null && $dataset !== '' && $this->pathsFactory !== null) {
+        // If dataset is known and a factory exists, prefer canonical output/profile defaults —
+        // but only when the caller has NOT provided an explicit --output, so we don't route
+        // the profile to APP_DATA_DIR when the user just wants a simple file conversion.
+        if ($paths === null && $output === null && $dataset !== null && $dataset !== '' && $this->pathsFactory !== null) {
             $paths = $this->pathsFactory->for($dataset);
         }
 
@@ -364,12 +372,14 @@ final class ImportConvertCommand
             'samples'      => $samples,
         ];
 
-        $this->ensureDir($profilePath);
-        \file_put_contents(
-            $profilePath,
-            \json_encode($fullProfile, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES)
-        );
-        $io->success(\sprintf('Profile written to %s', $profilePath));
+        if ($saveProfile) {
+            $this->ensureDir($profilePath);
+            \file_put_contents(
+                $profilePath,
+                \json_encode($fullProfile, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES)
+            );
+            $io->success(\sprintf('Profile written to %s', $profilePath));
+        }
 
         $dispatchTags = $tags;
         if (in_array('export:csv', $tags, true) || in_array('export.csv', $tags, true)) {
@@ -617,7 +627,7 @@ final class ImportConvertCommand
     {
         $dir = \dirname($filePath);
         if ($dir !== '' && !\is_dir($dir)) {
-            \mkdir($dir, 0o777, true);
+            (new Filesystem())->mkdir($dir);
         }
     }
 
@@ -707,7 +717,9 @@ final class ImportConvertCommand
                     $dirName = $name;
                     $io->note(\sprintf('ZIP path "%s" is a directory; importing all records under it.', $dirName));
                     $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_dir_' . \uniqid('', true);
-                    \mkdir($tmpDir, 0o777, true);
+                    if (!\mkdir($tmpDir, 0o777, true) && !\is_dir($tmpDir)) {
+                        throw new \RuntimeException(sprintf('Cannot create temp directory "%s".', $tmpDir));
+                    }
                     $fileNames = [];
 
                     for ($i = 0; $i < $zip->numFiles; $i++) {

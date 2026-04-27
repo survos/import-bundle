@@ -19,16 +19,18 @@ final class DataPathsFactoryAdapter implements DatasetPathsFactoryInterface
 
     public function for(string $datasetKey): ImportDatasetPaths
     {
-        $dataset = $this->dataPaths->dataset($datasetKey);
-        
+        $rawDir        = $this->dataPaths->stageDir($datasetKey, 'raw');
+        $normalizedDir = $this->dataPaths->stageDir($datasetKey, 'normalize');
+        $termsDir      = $this->dataPaths->stageDir($datasetKey, 'terms');
+
         return new ImportDatasetPaths(
-            datasetKey: $datasetKey,
-            datasetRoot: $dataset->dir,
-            rawDir: $dataset->rawDir,
-            rawObjectPath: $dataset->rawFile('obj.jsonl'),
-            normalizedDir: $dataset->normalizeDir,
-            normalizedObjectPath: $dataset->normalizeFile('obj.jsonl'),
-            termsDir: $dataset->termsDir,
+            datasetKey:           $datasetKey,
+            datasetRoot:          $this->dataPaths->datasetDir($datasetKey),
+            rawDir:               $rawDir,
+            rawObjectPath:        $rawDir . '/obj.jsonl',
+            normalizedDir:        $normalizedDir,
+            normalizedObjectPath: $normalizedDir . '/obj.jsonl',
+            termsDir:             $termsDir,
         );
     }
 }

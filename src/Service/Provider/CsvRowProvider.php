@@ -16,6 +16,12 @@ final class CsvRowProvider implements RowProviderInterface
 
     public function iterate(string $path, ProviderContext $ctx): \Generator
     {
+        if (!class_exists(CsvReader::class)) {
+            throw new \RuntimeException(
+                'CSV support requires league/csv. Install it with: composer require league/csv'
+            );
+        }
+
         $firstChunk = \file_get_contents($path, false, null, 0, 4096) ?: '';
         $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
 
