@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
-use Survos\ImportBundle\Dto\Attributes\Map as MapAttr;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionProperty;
+use Survos\FieldBundle\Attribute\Map as MapAttr;
 
 /**
  * Reflection-based mapper: populates a DTO from a flat record array.

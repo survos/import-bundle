@@ -15,7 +15,8 @@
         "symfony/stopwatch": "^7.4||^8.0",
         "twig/twig": "^3.4",
         "symfony/type-info": "^7.4||^8.0",
-        "symfony/property-access": "^8.0"
+        "symfony/property-access": "^8.0",
+        "survos/field-bundle": "^2.1"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest",
