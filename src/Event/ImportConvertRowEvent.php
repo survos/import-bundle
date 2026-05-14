@@ -19,6 +19,7 @@ final class ImportConvertRowEvent
         public ?string $dataset,
         public array   $tags = [],
         public ?string $status = self::STATUS_OKAY,
+        public string  $stage = 'normalize',
 
         /**
          * Optional profile file to drive transforms on pass 2 (e.g. split lists).

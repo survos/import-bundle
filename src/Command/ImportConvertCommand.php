@@ -45,6 +45,7 @@ final class ImportConvertCommand
 {
     /** @var array<string,string> normalizedName => originalHeader */
     private array $fieldOriginalNames = [];
+    private string $currentStage = 'normalize';
 
     /** @var string[] */
     private array $extraTags = [];
@@ -112,10 +113,11 @@ final class ImportConvertCommand
         $saveProfile ??= true;
 
         $stage = strtolower(trim($stage));
-        if (!in_array($stage, ['raw', 'normalize'], true)) {
-            $io->error(sprintf('Unsupported --stage=%s. Allowed values: raw, normalize.', $stage));
+        if (!in_array($stage, ['raw', 'normalize', 'ai', 'enrich'], true)) {
+            $io->error(sprintf('Unsupported --stage=%s. Allowed values: raw, normalize, ai, enrich.', $stage));
             return Command::FAILURE;
         }
+        $this->currentStage = $stage;
 
         $core = trim($core);
         if ($core === '') {
@@ -145,7 +147,9 @@ final class ImportConvertCommand
             }
 
             $paths = $this->pathsFactory->for($dataset);
-            $input = $this->canonicalStagePath($paths, 'raw', $core);
+            // enrich/ai stages read normalized data; all others start from raw
+            $inputStage = in_array($stage, ['ai', 'enrich'], true) ? 'normalize' : 'raw';
+            $input = $this->canonicalStagePath($paths, $inputStage, $core);
 
             // Prefer canonical stage output unless caller provided --output
             $output ??= $this->canonicalStagePath($paths, $stage, $core);
@@ -567,7 +571,9 @@ final class ImportConvertCommand
     private function canonicalStagePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
     {
         return match ($stage) {
-            'raw' => $this->canonicalRawInputPath($paths, $core),
+            'raw'   => $this->canonicalRawInputPath($paths, $core),
+            'ai'     => rtrim($paths->datasetRoot, '/') . '/40_ai/' . $core . '.jsonl',
+            'enrich' => rtrim($paths->datasetRoot, '/') . '/60_enrich/' . $core . '.jsonl',
             default => rtrim($paths->normalizedDir, '/') . '/' . $core . '.jsonl',
         };
     }
@@ -887,6 +893,7 @@ final class ImportConvertCommand
             $dataset,
             $tags,
             ImportConvertRowEvent::STATUS_OKAY,
+            stage: $this->currentStage ?? 'normalize',
             applyProfilePath: $applyProfilePath,
         );
 
