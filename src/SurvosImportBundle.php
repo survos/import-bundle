@@ -12,12 +12,14 @@ use Survos\ImportBundle\Command\ImportExportCsvCommand;
 use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
 use Survos\ImportBundle\Compiler\FetchAwareEntityPass;
+use Survos\ImportBundle\EventListener\DtoMapRecordListener;
 use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
 use Survos\ImportBundle\EventListener\FetchPageCountUpdateListener;
 use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
 use Survos\ImportBundle\MessageHandler\FetchPageMessageHandler;
 use Survos\ImportBundle\Repository\FetchPageRepository;
 use Survos\ImportBundle\Repository\FetchRecordRepository;
+use Survos\ImportBundle\Service\DtoClassResolver;
 use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\DtoMapper;
@@ -182,6 +184,15 @@ class SurvosImportBundle extends AbstractBundle
             ->setPublic(true)
             ->setAutoconfigured(true);
 
+        $builder->autowire(DtoClassResolver::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->setArgument('$explicit', $config['dto_mappings'])
+            ->setArgument('$namespaceRoots', $config['dto_namespace_roots']);
+
+        $builder->autowire(DtoMapRecordListener::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
 
     }
 
@@ -189,7 +200,18 @@ class SurvosImportBundle extends AbstractBundle
     {
         $definition->rootNode()
             ->children()
-            ->scalarNode('dir')->info("The default directory for data files")->defaultValue('data')->end()
+                ->scalarNode('dir')->info('Default directory for data files')->defaultValue('data')->end()
+                ->arrayNode('dto_namespace_roots')
+                    ->info('Namespace roots for convention-based DTO class resolution (e.g. App\\Dto)')
+                    ->scalarPrototype()->end()
+                    ->defaultValue([])
+                ->end()
+                ->arrayNode('dto_mappings')
+                    ->info('Explicit dataset → FQCN mappings, overrides convention (e.g. mus/aust: App\\Dto\\Aust\\Obj)')
+                    ->useAttributeAsKey('dataset')
+                    ->scalarPrototype()->end()
+                    ->defaultValue([])
+                ->end()
             ->end();
     }
 

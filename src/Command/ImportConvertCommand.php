@@ -51,13 +51,13 @@ final class ImportConvertCommand
     private array $extraTags = [];
 
     public function __construct(
-        private readonly JsonlProfilerInterface $profiler,
         private readonly RowProviderRegistry $rowProviders,
         private readonly RowNormalizer $rowNormalizer,
         private readonly CsvProfileExporter $csvExporter,
         private readonly string $dataDir,
         private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
+        private readonly ?JsonlProfilerInterface $profiler = null,
     ) {
     }
 
@@ -950,6 +950,10 @@ final class ImportConvertCommand
             }
         }
 
+        if ($this->profiler === null) {
+            $io->note('Profiling skipped — install survos/jsonl-bundle to enable field profiling.');
+            return [[], $count, [], ['top' => [], 'bottom' => []]];
+        }
         $fieldsProfile = $this->profiler->profile($rows);
         $uniqueFields  = $this->detectPrimaryKeyCandidates($fieldsProfile, $count, $rows);
 
