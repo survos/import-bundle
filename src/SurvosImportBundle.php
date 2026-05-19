@@ -82,6 +82,10 @@ class SurvosImportBundle extends AbstractBundle
         $builder->registerForAutoconfiguration(RowProviderInterface::class)
             ->addTag('survos.import.row_provider');
 
+        $builder->autowire(EntityClassResolver::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
             $builder->autowire(ImportEntitiesCommand::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true)

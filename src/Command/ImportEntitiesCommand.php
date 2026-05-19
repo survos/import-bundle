@@ -11,7 +11,7 @@ use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 use Symfony\Component\PropertyAccess\PropertyAccess;
 use JsonMachine\Items;
 use League\Csv\Reader as CsvReader;
-use Survos\CoreBundle\Service\EntityClassResolver;
+use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Event\ImportEntitiesFinishedEvent;
 use Survos\ImportBundle\Event\ImportEntityMappedEvent;
 use Survos\ImportBundle\Event\ImportEntityPersistedEvent;
