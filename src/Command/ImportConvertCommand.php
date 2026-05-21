@@ -38,7 +38,8 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
-use App\Field\CanonicalField;
+use Survos\DataContracts\Vocabulary\ItemField;
+use Survos\DataContracts\Vocabulary\MuseumVocab;
 
 #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
 final class ImportConvertCommand
@@ -147,8 +148,7 @@ final class ImportConvertCommand
             }
 
             $paths = $this->pathsFactory->for($dataset);
-            // enrich/ai stages read normalized data; all others start from raw
-            $inputStage = in_array($stage, ['ai', 'enrich'], true) ? 'normalize' : 'raw';
+            $inputStage = $profileOnly ? $stage : self::inputStage($stage);
             $input = $this->canonicalStagePath($paths, $inputStage, $core);
 
             // Prefer canonical stage output unless caller provided --output
@@ -509,29 +509,35 @@ final class ImportConvertCommand
         return Command::SUCCESS;
     }
 
+    /** Returns the canonical input stage for a given output stage (for conversion, not profiling). */
+    public static function inputStage(string $stage): string
+    {
+        return in_array($stage, ['ai', 'enrich'], true) ? 'normalize' : 'raw';
+    }
+
     /**
      * @return list<string>
      */
     private function canonicalFieldNames(): array
     {
         return [
-            CanonicalField::SOURCE_ID,
-            CanonicalField::ID,
-            CanonicalField::TITLE,
-            CanonicalField::DESCRIPTION,
+            ItemField::SOURCE_ID,
+            ItemField::ID,
+            ItemField::TITLE,
+            ItemField::DESCRIPTION,
             'type',
-            CanonicalField::RIGHTS,
+            ItemField::RIGHTS,
             'citation',
-            CanonicalField::CULTURE,
-            CanonicalField::TECHNIQUE,
-            CanonicalField::DEPARTMENT,
-            CanonicalField::COLLECTION,
-            CanonicalField::CITATION_URL,
-            CanonicalField::URL,
-            CanonicalField::PAGE_URL,
-            CanonicalField::IMAGE_URL,
-            CanonicalField::THUMBNAIL_URL,
-            CanonicalField::LICENSE,
+            MuseumVocab::CULTURE,
+            MuseumVocab::TECHNIQUE,
+            MuseumVocab::DEPARTMENT,
+            MuseumVocab::COLLECTION,
+            ItemField::CITATION_URL,
+            ItemField::URL,
+            ItemField::PAGE_URL,
+            ItemField::IIIF_BASE,
+            ItemField::THUMBNAIL_URL,
+            ItemField::LICENSE,
         ];
     }
 

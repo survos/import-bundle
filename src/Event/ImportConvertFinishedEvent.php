@@ -13,7 +13,7 @@ final class ImportConvertFinishedEvent
      * @param string   $jsonlPath
      * @param string   $profilePath
      * @param int      $recordCount
-     * @param ?string  $dataset
+     * @param string  $dataset
      * @param string[] $tags
      * @param ?int     $limit
      * @param ?string  $zipPath
@@ -24,7 +24,7 @@ final class ImportConvertFinishedEvent
         public readonly string $jsonlPath,
         public readonly string $profilePath,
         public readonly int $recordCount,
-        public readonly ?string $dataset,
+        public readonly string $dataset,
         public readonly array $tags = [],
         public readonly ?int $limit = null,
         public readonly ?string $zipPath = null,

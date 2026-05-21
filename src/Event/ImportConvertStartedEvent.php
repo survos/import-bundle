@@ -22,7 +22,7 @@ final class ImportConvertStartedEvent
      * @param string   $input
      * @param string   $jsonlPath
      * @param string   $profilePath
-     * @param ?string  $dataset
+     * @param string  $dataset
      * @param string[] $tags
      * @param ?int     $limit
      * @param ?string  $zipPath
@@ -32,7 +32,7 @@ final class ImportConvertStartedEvent
         public readonly string $input,
         public readonly string $jsonlPath,
         public readonly string $profilePath,
-        public readonly ?string $dataset,
+        public readonly string $dataset,
         public readonly array $tags = [],
         public readonly ?int $limit = null,
         public readonly ?string $zipPath = null,

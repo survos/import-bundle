@@ -16,7 +16,7 @@ final class ImportConvertRowEvent
         public string  $input,
         public string  $format,
         public int     $index,
-        public ?string $dataset,
+        public string $dataset,
         public array   $tags = [],
         public ?string $status = self::STATUS_OKAY,
         public string  $stage = 'normalize',
