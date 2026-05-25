@@ -15,6 +15,7 @@ use Survos\ImportBundle\Compiler\FetchAwareEntityPass;
 use Survos\ImportBundle\EventListener\DtoMapRecordListener;
 use Survos\ImportBundle\EventListener\ExportCsvOnConvertFinishedListener;
 use Survos\ImportBundle\EventListener\FetchPageCountUpdateListener;
+use Survos\ImportBundle\EventListener\NormalizeFallbackListener;
 use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
 use Survos\ImportBundle\MessageHandler\FetchPageMessageHandler;
 use Survos\ImportBundle\Repository\FetchPageRepository;
@@ -169,7 +170,7 @@ class SurvosImportBundle extends AbstractBundle
             ->setAutoconfigured(true);
 
         // Register adapter for data-bundle integration if data-bundle is available
-        if (class_exists(\Survos\DataBundle\Service\DataPaths::class)) {
+        if (class_exists(\Survos\DatasetBundle\Service\DataPaths::class)) {
             $builder->autowire(\Survos\ImportBundle\Service\DataPathsFactoryAdapter::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true);
@@ -195,6 +196,10 @@ class SurvosImportBundle extends AbstractBundle
             ->setArgument('$namespaceRoots', $config['dto_namespace_roots']);
 
         $builder->autowire(DtoMapRecordListener::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true);
+
+        $builder->autowire(NormalizeFallbackListener::class)
             ->setPublic(true)
             ->setAutoconfigured(true);
 

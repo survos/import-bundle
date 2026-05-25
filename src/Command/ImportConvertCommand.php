@@ -38,6 +38,9 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
+use Symfony\Bridge\Doctrine\Attribute\MapEntity;
+use Survos\DatasetBundle\Entity\DatasetInfo;
+use Survos\DatasetBundle\Entity\Provider;
 use Survos\DataContracts\Vocabulary\ItemField;
 use Survos\DataContracts\Vocabulary\MuseumVocab;
 
@@ -103,6 +106,9 @@ final class ImportConvertCommand
         )]
         ?string $applyProfile = null,
 
+        #[Option('Convert all datasets for a provider (e.g. "mus")'), MapEntity]
+        ?Provider $provider = null,
+
         #[Option('Output in CSV format instead of JSONL')]
         bool $csv = false,
 
@@ -124,6 +130,33 @@ final class ImportConvertCommand
         if ($core === '') {
             $io->error('The --core option cannot be empty.');
             return Command::FAILURE;
+        }
+
+        dd($provider);
+        // Resolve dataset list: --provider populates from DB, --dataset is a single entry
+        $datasetKeys = [];
+        if ($provider !== null) {
+            $datasetKeys = array_map(static fn(DatasetInfo $d): string => $d->datasetKey, $provider->getDatasets()->toArray());
+        } elseif ($dataset !== null && $dataset !== '' && $input === null) {
+            $datasetKeys = [$dataset];
+        }
+
+        // Multiple datasets: iterate and recurse
+        if (count($datasetKeys) > 1) {
+            $failed = 0;
+            foreach ($datasetKeys as $key) {
+                $io->section($key);
+                $result = $this($io, dataset: $key, limit: $limit, stage: $stage, core: $core, saveProfile: $saveProfile, csv: $csv);
+                if ($result !== Command::SUCCESS) {
+                    $failed++;
+                }
+            }
+            return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+        }
+
+        // Single dataset from list
+        if (count($datasetKeys) === 1) {
+            $dataset = $datasetKeys[0];
         }
 
         $this->fieldOriginalNames = [];
@@ -294,19 +327,24 @@ final class ImportConvertCommand
             $attemptedCount = 0;
             $rejectedCount = 0;
             $limitReached = false;
+            $claimRows = $stage === 'enrich' && $paths !== null ? $this->claimRows($paths, $core) : [];
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
                 $attemptedCount++;
-                $row = $this->rowNormalizer->normalizeRow($row);
+                if ($stage === 'enrich') {
+                    $row = $this->mergeClaims($row, $claimRows);
+                } else {
+                    $row = $this->rowNormalizer->normalizeRow($row);
 
-                $row = $this->applyRowCallbacks(
-                    $row,
-                    $input,
-                    $sourceExt,
-                    $dataset,
-                    $index,
-                    $applyProfilePath
-                );
+                    $row = $this->applyRowCallbacks(
+                        $row,
+                        $input,
+                        $sourceExt,
+                        $dataset,
+                        $index,
+                        $applyProfilePath
+                    );
+                }
                 $index++;
 
                 if ($row === null) {
@@ -442,6 +480,62 @@ final class ImportConvertCommand
         }
 
         return $dump;
+    }
+
+    /**
+     * @return array<string,list<array{predicate:string,value:mixed}>>
+     */
+    private function claimRows(\Survos\ImportBundle\Model\DatasetPaths $paths, string $core): array
+    {
+        $file = rtrim($paths->datasetRoot, '/') . '/40_ai/' . $core . '.jsonl';
+        if (!is_file($file)) {
+            return [];
+        }
+
+        $claimsById = [];
+        foreach (JsonlReader::open($file) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $id = $row['id'] ?? null;
+            $claims = $row['claims'] ?? null;
+            if (!is_scalar($id) || !is_array($claims)) {
+                continue;
+            }
+
+            foreach ($claims as $claim) {
+                if (!is_array($claim) || !is_string($claim['predicate'] ?? null) || !array_key_exists('value', $claim)) {
+                    continue;
+                }
+
+                $claimsById[(string) $id][] = [
+                    'predicate' => $claim['predicate'],
+                    'value' => $claim['value'],
+                ];
+            }
+        }
+
+        return $claimsById;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,list<array{predicate:string,value:mixed}>> $claimRows
+     * @return array<string,mixed>
+     */
+    private function mergeClaims(array $row, array $claimRows): array
+    {
+        $id = $row[ItemField::ID] ?? $row['id'] ?? null;
+        if (!is_scalar($id)) {
+            return $row;
+        }
+
+        foreach ($claimRows[(string) $id] ?? [] as $claim) {
+            $row[$claim['predicate']] = $claim['value'];
+        }
+
+        return $row;
     }
 
     private function dumpRecord(

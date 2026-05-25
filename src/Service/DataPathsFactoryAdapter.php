@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
-use Survos\DataBundle\Service\DataPaths;
+use Survos\DatasetBundle\Service\DataPaths;
 use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Model\DatasetPaths as ImportDatasetPaths;
 
