@@ -27,7 +27,7 @@ final class DataPathsFactoryAdapter implements DatasetPathsFactoryInterface
             datasetKey:           $datasetKey,
             datasetRoot:          $this->dataPaths->datasetDir($datasetKey),
             rawDir:               $rawDir,
-            rawObjectPath:        $rawDir . '/obj.jsonl',
+            rawObjectPath:        $this->dataPaths->firstReadableStageFile($datasetKey, 'raw') ?? $rawDir . '/obj.jsonl',
             normalizedDir:        $normalizedDir,
             normalizedObjectPath: $normalizedDir . '/obj.jsonl',
             termsDir:             $termsDir,

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
+use Doctrine\ORM\EntityManagerInterface;
 use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
@@ -38,7 +39,6 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
-use Symfony\Bridge\Doctrine\Attribute\MapEntity;
 use Survos\DatasetBundle\Entity\DatasetInfo;
 use Survos\DatasetBundle\Entity\Provider;
 use Survos\DataContracts\Vocabulary\ItemField;
@@ -62,6 +62,7 @@ final class ImportConvertCommand
         private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
         private readonly ?JsonlProfilerInterface $profiler = null,
+        private readonly ?EntityManagerInterface $entityManager = null,
     ) {
     }
 
@@ -92,6 +93,9 @@ final class ImportConvertCommand
         #[Option('Dataset core filename stem (default: obj)', name: 'core')]
         string $core = 'obj',
 
+        #[Option('Convert every raw core JSONL file for the dataset')]
+        bool $allCores = false,
+
         #[Option('Additional tags (comma-separated, e.g. "wikidata,youtube")', name: 'tags')]
         ?string $tagsOption = null,
 
@@ -106,8 +110,8 @@ final class ImportConvertCommand
         )]
         ?string $applyProfile = null,
 
-        #[Option('Convert all datasets for a provider (e.g. "mus")'), MapEntity]
-        ?Provider $provider = null,
+        #[Option('Convert all datasets for a provider (e.g. "mus")')]
+        ?string $provider = null,
 
         #[Option('Output in CSV format instead of JSONL')]
         bool $csv = false,
@@ -132,11 +136,19 @@ final class ImportConvertCommand
             return Command::FAILURE;
         }
 
-        dd($provider);
         // Resolve dataset list: --provider populates from DB, --dataset is a single entry
         $datasetKeys = [];
-        if ($provider !== null) {
-            $datasetKeys = array_map(static fn(DatasetInfo $d): string => $d->datasetKey, $provider->getDatasets()->toArray());
+        if ($provider !== null && $provider !== '') {
+            if ($this->entityManager === null) {
+                $io->error('--provider requires dataset-bundle.');
+                return Command::FAILURE;
+            }
+            $providerEntity = $this->entityManager->getRepository(Provider::class)->find($provider);
+            if ($providerEntity === null) {
+                $io->error(sprintf('Provider "%s" not found. Run dataset:scan first.', $provider));
+                return Command::FAILURE;
+            }
+            $datasetKeys = array_map(static fn(DatasetInfo $d): string => $d->datasetKey, $providerEntity->getDatasets()->toArray());
         } elseif ($dataset !== null && $dataset !== '' && $input === null) {
             $datasetKeys = [$dataset];
         }
@@ -146,7 +158,16 @@ final class ImportConvertCommand
             $failed = 0;
             foreach ($datasetKeys as $key) {
                 $io->section($key);
-                $result = $this($io, dataset: $key, limit: $limit, stage: $stage, core: $core, saveProfile: $saveProfile, csv: $csv);
+                $result = $this(
+                    $io,
+                    dataset: $key,
+                    limit: $limit,
+                    stage: $stage,
+                    core: $core,
+                    allCores: $allCores,
+                    saveProfile: $saveProfile,
+                    csv: $csv
+                );
                 if ($result !== Command::SUCCESS) {
                     $failed++;
                 }
@@ -181,6 +202,48 @@ final class ImportConvertCommand
             }
 
             $paths = $this->pathsFactory->for($dataset);
+
+            if ($allCores) {
+                if ($output !== null && $output !== '') {
+                    $io->error('--all-cores cannot be combined with --output. Each core writes to its canonical output path.');
+                    return Command::FAILURE;
+                }
+                if ($profileOnly) {
+                    $io->error('--all-cores cannot be combined with --profile-only. Profile one core at a time.');
+                    return Command::FAILURE;
+                }
+
+                $cores = $this->discoverRawCores($paths);
+                if ($cores === []) {
+                    $io->error(sprintf('No raw core JSONL files found in %s.', $paths->rawDir));
+                    return Command::FAILURE;
+                }
+
+                $failed = 0;
+                foreach ($cores as $rawCore) {
+                    $io->section(sprintf('%s / %s', $dataset, $rawCore));
+                    $result = $this(
+                        $io,
+                        limit: $limit,
+                        saveProfile: $saveProfile,
+                        dataset: $dataset,
+                        stage: $stage,
+                        core: $rawCore,
+                        tagsOption: $tagsOption,
+                        zipPath: $zipPath,
+                        rootKey: $rootKey,
+                        applyProfile: $applyProfile,
+                        csv: $csv,
+                        dump: $dump
+                    );
+                    if ($result !== Command::SUCCESS) {
+                        $failed++;
+                    }
+                }
+
+                return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+            }
+
             $inputStage = $profileOnly ? $stage : self::inputStage($stage);
             $input = $this->canonicalStagePath($paths, $inputStage, $core);
 
@@ -635,6 +698,46 @@ final class ImportConvertCommand
         ];
     }
 
+
+    /**
+     * @return list<string>
+     */
+    private function discoverRawCores(\Survos\ImportBundle\Model\DatasetPaths $paths): array
+    {
+        $rawDir = rtrim($paths->rawDir, '/');
+        if (!is_dir($rawDir)) {
+            return [];
+        }
+
+        $cores = [];
+        foreach (new \DirectoryIterator($rawDir) as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+
+            $name = $file->getFilename();
+            if (preg_match('/^([A-Za-z0-9_-]+)\.jsonl(?:\.gz)?$/', $name, $matches) !== 1) {
+                continue;
+            }
+
+            $cores[$matches[1]] = true;
+        }
+
+        $result = array_keys($cores);
+        usort($result, static function (string $left, string $right): int {
+            if ($left === 'obj') {
+                return $right === 'obj' ? 0 : -1;
+            }
+            if ($right === 'obj') {
+                return 1;
+            }
+
+            return $left <=> $right;
+        });
+
+        return array_values($result);
+    }
+
     private function inferDatasetFromInput(string $input): ?string
     {
         $dataRoot = rtrim($this->dataDir, '/');
@@ -680,6 +783,16 @@ final class ImportConvertCommand
 
     private function canonicalRawInputPath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $core): string
     {
+        if ($core === 'obj') {
+            if (is_file($paths->rawObjectPath)) {
+                return $paths->rawObjectPath;
+            }
+
+            if (!str_ends_with($paths->rawObjectPath, '.gz') && is_file($paths->rawObjectPath . '.gz')) {
+                return $paths->rawObjectPath . '.gz';
+            }
+        }
+
         $base = rtrim($paths->rawDir, '/') . '/' . $core . '.jsonl';
         if (is_file($base)) {
             return $base;
@@ -928,9 +1041,13 @@ final class ImportConvertCommand
 
         if ($innerExt === '') {
             throw new \RuntimeException(\sprintf(
-                'Cannot infer underlying extension from GZIP "%s". Expected ".csv.gz" or ".json.gz".',
+                'Cannot infer underlying extension from GZIP "%s". Expected ".csv.gz", ".json.gz", or ".jsonl.gz".',
                 $gzPath
             ));
+        }
+
+        if ($innerExt === 'jsonl') {
+            return [$gzPath, $innerExt];
         }
 
         $tmpDir  = \sys_get_temp_dir() . '/import_bundle_gz_' . \uniqid('', true);
