@@ -29,7 +29,10 @@ final class NormalizeFallbackListener
         $row = &$event->row;
 
         if (!isset($row[ItemField::IIIF_BASE]) && isset($row[ItemField::LARGE_IMAGE_URL])) {
-            $row[ItemField::IIIF_BASE] = $row[ItemField::LARGE_IMAGE_URL];
+            $largeImageUrl = is_scalar($row[ItemField::LARGE_IMAGE_URL]) ? (string) $row[ItemField::LARGE_IMAGE_URL] : '';
+            if (str_contains($largeImageUrl, '/iiif/') || str_ends_with($largeImageUrl, '/info.json')) {
+                $row[ItemField::IIIF_BASE] = $largeImageUrl;
+            }
         }
 
         if (empty($row[ItemField::SEARCH_SUMMARY])) {

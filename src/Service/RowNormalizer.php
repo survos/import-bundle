@@ -100,6 +100,17 @@ final class RowNormalizer
     {
         $key = \strtolower($key);
 
+        // Plural-looking scalar fields where commas are usually prose or decimal punctuation.
+        $scalar = [
+            'dimensions',
+            'notes',
+            'rights',
+        ];
+
+        if (\in_array($key, $scalar, true)) {
+            return false;
+        }
+
         // Explicit list for common fields; add as we encounter them.
         $explicit = [
             'tags',

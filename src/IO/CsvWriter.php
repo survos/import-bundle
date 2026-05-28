@@ -34,6 +34,10 @@ final class CsvWriter
         private readonly string $enclosure = '"',
         private readonly string $escape = '\\',
     ) {
+        if (!\class_exists(LeagueCsvWriter::class) || !\class_exists(CannotInsertRecord::class)) {
+            throw new RuntimeException("CSV writing requires league/csv. Install it with: composer require league/csv");
+        }
+
         $this->file = $this->filename;
         $this->csv = LeagueCsvWriter::from($this->filename, 'w');
         $this->csv->setDelimiter($this->delimiter);
@@ -96,7 +100,7 @@ final class CsvWriter
             throw new RuntimeException(sprintf('Failed to open source file "%s".', $sourceFile));
         }
 
-        $headers = fgetcsv($handle, 0, $this->delimiter);
+        $headers = fgetcsv($handle, 0, $this->delimiter, '"', '\\');
         fclose($handle);
 
         if ($headers === false) {

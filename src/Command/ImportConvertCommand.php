@@ -41,6 +41,7 @@ use function strlen;
 use function substr;
 use Survos\DatasetBundle\Entity\DatasetInfo;
 use Survos\DatasetBundle\Entity\Provider;
+use Survos\DataContracts\Metadata\ContentType;
 use Survos\DataContracts\Vocabulary\ItemField;
 use Survos\DataContracts\Vocabulary\MuseumVocab;
 
@@ -439,7 +440,7 @@ final class ImportConvertCommand
 
         // Profiling
         $io->section(\sprintf('Profiling %s', $csv ? 'CSV' : 'JSONL'));
-        [$fieldsProfile, $recordCount, $uniqueFields, $samples] = $this->buildProfile($outputPath, $limit);
+        [$fieldsProfile, $recordCount, $uniqueFields, $samples, $extraFieldStats] = $this->buildProfile($outputPath, $limit);
 
         // Inject original header name if we know it
         foreach ($fieldsProfile as $name => &$stats) {
@@ -475,6 +476,7 @@ final class ImportConvertCommand
             'uniqueFields' => $uniqueFields,
             'fields'       => $fieldsProfile,
             'samples'      => $samples,
+            'extraFields'  => $extraFieldStats,
         ];
 
         if ($saveProfile) {
@@ -1133,7 +1135,8 @@ final class ImportConvertCommand
      *   0: array<string,mixed>,
      *   1: int,
      *   2: string[],
-     *   3: array{top:array<int,mixed>,bottom:array<int,mixed>}
+     *   3: array{top:array<int,mixed>,bottom:array<int,mixed>},
+     *   4: array<string,mixed>
      * }
      */
     private function buildProfile(string $filePath, ?int $limit): array
@@ -1143,6 +1146,10 @@ final class ImportConvertCommand
 
         // Determine file type and read accordingly
         if (str_ends_with($filePath, '.csv')) {
+            if (!\class_exists(CsvReader::class)) {
+                throw new RuntimeException('CSV profiling requires league/csv. Install it with: composer require league/csv');
+            }
+
             $csv = CsvReader::from($filePath);
             $csv->setHeaderOffset(0);
             foreach ($csv->getRecords() as $record) {
@@ -1169,10 +1176,11 @@ final class ImportConvertCommand
 
         if ($this->profiler === null) {
             $io->note('Profiling skipped — install survos/jsonl-bundle to enable field profiling.');
-            return [[], $count, [], ['top' => [], 'bottom' => []]];
+            return [[], $count, [], ['top' => [], 'bottom' => []], $this->emptyExtraFieldStats()];
         }
         $fieldsProfile = $this->profiler->profile($rows);
         $uniqueFields  = $this->detectPrimaryKeyCandidates($fieldsProfile, $count, $rows);
+        $extraFieldStats = $this->profileExtraFields($rows);
 
         $topLimit    = 1024;
         $bottomLimit = 32;
@@ -1180,7 +1188,144 @@ final class ImportConvertCommand
         $top    = \array_slice($rows, 0, \min($topLimit, $count));
         $bottom = ($count > $bottomLimit) ? \array_slice($rows, -$bottomLimit) : [];
 
-        return [$fieldsProfile, $count, $uniqueFields, ['top' => $top, 'bottom' => $bottom]];
+        return [$fieldsProfile, $count, $uniqueFields, ['top' => $top, 'bottom' => $bottom], $extraFieldStats];
+    }
+
+
+    /**
+     * @param array<int,array<string,mixed>> $rows
+     * @return array<string,mixed>
+     */
+    private function profileExtraFields(array $rows): array
+    {
+        $stats = $this->emptyExtraFieldStats();
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $stats['rows']++;
+            $contentType = $this->rowContentType($row);
+            $stats['byContentType'][$contentType] ??= [
+                'rows' => 0,
+                'rowsWithExtras' => 0,
+                'rowsWithExtrasPercent' => 0.0,
+                'distinctKeyCount' => 0,
+                'keys' => [],
+            ];
+            $stats['byContentType'][$contentType]['rows']++;
+
+            $extras = $this->extraFieldsForRow($row);
+            if ($extras === []) {
+                continue;
+            }
+
+            $stats['rowsWithExtras']++;
+            $stats['maxExtraFieldsPerRow'] = max($stats['maxExtraFieldsPerRow'], count($extras));
+            $stats['byContentType'][$contentType]['rowsWithExtras']++;
+
+            foreach (array_keys($extras) as $key) {
+                $stats['keys'][$key] = ($stats['keys'][$key] ?? 0) + 1;
+                $stats['byContentType'][$contentType]['keys'][$key] = ($stats['byContentType'][$contentType]['keys'][$key] ?? 0) + 1;
+            }
+        }
+
+        arsort($stats['keys']);
+        $stats['distinctKeyCount'] = count($stats['keys']);
+        $stats['rowsWithExtrasPercent'] = $stats['rows'] > 0 ? round(($stats['rowsWithExtras'] / $stats['rows']) * 100, 2) : 0.0;
+
+        foreach ($stats['byContentType'] as $type => $typeStats) {
+            arsort($typeStats['keys']);
+            $typeStats['distinctKeyCount'] = count($typeStats['keys']);
+            $typeStats['rowsWithExtrasPercent'] = $typeStats['rows'] > 0 ? round(($typeStats['rowsWithExtras'] / $typeStats['rows']) * 100, 2) : 0.0;
+            $stats['byContentType'][$type] = $typeStats;
+        }
+
+        return $stats;
+    }
+
+    /** @return array{rows:int,rowsWithExtras:int,rowsWithExtrasPercent:float,distinctKeyCount:int,maxExtraFieldsPerRow:int,keys:array<string,int>,byContentType:array<string,mixed>} */
+    private function emptyExtraFieldStats(): array
+    {
+        return [
+            'rows' => 0,
+            'rowsWithExtras' => 0,
+            'rowsWithExtrasPercent' => 0.0,
+            'distinctKeyCount' => 0,
+            'maxExtraFieldsPerRow' => 0,
+            'keys' => [],
+            'byContentType' => [],
+        ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function rowContentType(array $row): string
+    {
+        $type = $row['contentType'] ?? $row['content_type'] ?? null;
+
+        return is_scalar($type) && trim((string) $type) !== '' ? trim((string) $type) : '(missing)';
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function extraFieldsForRow(array $row): array
+    {
+        $type = $this->rowContentType($row);
+        if ($type === '(missing)') {
+            return $row;
+        }
+
+        $class = ContentType::dtoClass($type);
+        if (!class_exists($class)) {
+            return $row;
+        }
+
+        try {
+            $dto = method_exists($class, 'fromNormalized') ? $class::fromNormalized($row) : new $class();
+        } catch (\TypeError) {
+            $dto = new $class();
+        }
+        $known = array_fill_keys(array_keys(get_object_vars($dto)), true);
+        foreach ($this->knownNormalizedFieldNames() as $fieldName) {
+            $known[$fieldName] = true;
+        }
+        foreach (['class', 'content_type', 'contentType', 'dto_type', 'dtoType'] as $alias) {
+            $known[$alias] = true;
+        }
+
+        $extras = [];
+        foreach ($row as $key => $value) {
+            if (!isset($known[$key])) {
+                $extras[$key] = $value;
+            }
+        }
+
+        return $extras;
+    }
+
+    /** @return list<string> */
+    private function knownNormalizedFieldNames(): array
+    {
+        static $fields = null;
+        if ($fields !== null) {
+            return $fields;
+        }
+
+        $fieldMap = [];
+        foreach ([ItemField::class, MuseumVocab::class] as $interface) {
+            foreach ((new \ReflectionClass($interface))->getConstants() as $value) {
+                if (is_string($value) && $value !== '') {
+                    $fieldMap[$value] = true;
+                }
+            }
+        }
+
+        $fields = array_keys($fieldMap);
+
+        return $fields;
     }
 
     /**

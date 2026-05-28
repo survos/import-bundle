@@ -36,6 +36,9 @@
         "symfony/validator": "^8.0",
         "survos/dataset-bundle": "^1.0"
     },
+    "suggest": {
+        "league/csv": "Required for CSV input, CSV output, and CSV profiling commands."
+    },
     "autoload": {
         "psr-4": {
             "Survos\\ImportBundle\\": "src/"

@@ -288,6 +288,10 @@ final class ImportEntitiesCommand
 
         // CSV/TSV (delimiter sniff, quoted fields supported)
         if (in_array($ext, ['csv','tsv','txt'], true)) {
+            if (!\class_exists(CsvReader::class)) {
+                throw new \RuntimeException('CSV import requires league/csv. Install it with: composer require league/csv');
+            }
+
             $sample = file_get_contents($path, false, null, 0, 8192) ?: '';
             $delimiter = str_contains($sample, "\t") ? "\t" : ',';
 
