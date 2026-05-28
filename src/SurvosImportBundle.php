@@ -33,7 +33,9 @@ use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
 use Survos\ImportBundle\Service\RowNormalizer;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
 
 
@@ -201,7 +203,11 @@ class SurvosImportBundle extends AbstractBundle
 
         $builder->autowire(NormalizeFallbackListener::class)
             ->setPublic(true)
-            ->setAutoconfigured(true);
+            ->setAutoconfigured(true)
+            ->setArgument(
+                '$dimensionsNormalizer',
+                new Reference(\Survos\DimensionsBundle\Service\DimensionsNormalizer::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            );
 
     }
 
