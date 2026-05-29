@@ -40,9 +40,10 @@ final class NormalizeFallbackListener
 
         $this->normalizeDimensions($row);
 
-        if (empty($row[ItemField::SEARCH_SUMMARY])) {
-            $row[ItemField::SEARCH_SUMMARY] = $this->summaryBuilder->build($row);
-        }
+        // searchSummary disabled — it bloats the normalized rows and gets in the way.
+        // if (empty($row[ItemField::SEARCH_SUMMARY])) {
+        //     $row[ItemField::SEARCH_SUMMARY] = $this->summaryBuilder->build($row);
+        // }
     }
 
     /** @param array<string,mixed> $row */

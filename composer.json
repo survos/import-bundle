@@ -16,7 +16,7 @@
         "twig/twig": "^3.4",
         "symfony/type-info": "^7.4||^8.0",
         "symfony/property-access": "^8.0",
-        "survos/field-bundle": "^2.1"
+        "survos/field-bundle": "^2.5"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest",
@@ -25,16 +25,16 @@
         "symfony/phpunit-bridge": "^7.4||^8.0",
         "symfony/twig-bundle": "^7.4||^8.0",
         "symfony/var-dumper": "^7.4||^8.0",
-        "phpunit/phpunit": "^12.4",
+        "phpunit/phpunit": "^13.0",
         "doctrine/doctrine-bundle": "^3.0",
         "doctrine/orm": "^3.5",
         "symfony/serializer": "^7.4||^8.0",
         "phpstan/phpstan-symfony": "^2.0",
-        "survos/jsonl-bundle": "^2.0",
+        "survos/jsonl-bundle": "^2.5",
         "league/csv": "^9.27",
         "halaxa/json-machine": "^1.2",
         "symfony/validator": "^8.0",
-        "survos/dataset-bundle": "^1.0"
+        "survos/dataset-bundle": "^2.5"
     },
     "suggest": {
         "league/csv": "Required for CSV input, CSV output, and CSV profiling commands."
