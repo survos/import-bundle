@@ -21,6 +21,15 @@ SurvosImportBundle provides exactly that pipeline:
 
 You can also use it in a simpler “direct CSV → Entity → Import” mode for quick one-off jobs and demos.
 
+### Conversion is a callable service
+
+`ImportConvertCommand` carries `#[AsCommand('import:convert')]` on its `convert()` **method**
+(not the class), so it is a plain autowired service in addition to being the command. Other
+bundles inject it and call `convert($io, dataset: …, stage: …)` directly, passing the same
+`SymfonyStyle`. dataset-bundle's `dataset:normalize` / `dataset:assemble` shortcuts use this to
+initiate imports from the dataset side. (Planned: extract a dedicated `ConvertService` and make
+import-bundle a soft dependency on dataset-bundle.)
+
 ---
 
 ## Table of Contents

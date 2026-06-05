@@ -98,11 +98,14 @@ class SurvosImportBundle extends AbstractBundle
                 ->addTag('console.command');
             // @todo: inject each service properly
 
+        // Method-level #[AsCommand] on convert(); autoconfigure registers the command tag
+        // (no bare console.command tag — that assumed __invoke). Public + autowired so other
+        // bundles can inject it and call convert() directly.
+        // TODO(bundle-refactor): extract a ConvertService; the command becomes a thin caller.
         $builder->autowire(ImportConvertCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
-            ->setArgument('$dataDir', $config['dir'])
-            ->addTag('console.command');
+            ->setArgument('$dataDir', $config['dir']);
 
         $builder->autowire(ImportProfileReportCommand::class)
             ->setPublic(true)

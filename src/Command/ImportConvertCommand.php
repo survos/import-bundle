@@ -41,11 +41,20 @@ use function strlen;
 use function substr;
 use Survos\DatasetBundle\Entity\DatasetInfo;
 use Survos\DatasetBundle\Entity\Provider;
+use Survos\DatasetBundle\Enum\Stage;
 use Survos\DataContracts\Metadata\ContentType;
 use Survos\DataContracts\Vocabulary\ItemField;
 use Survos\DataContracts\Vocabulary\MuseumVocab;
 
-#[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
+/**
+ * Conversion service AND the import:convert command.
+ *
+ * The #[AsCommand] is on convert() (method-level) rather than the class, so this is a
+ * plain autowired service that other bundles (e.g. dataset-bundle's dataset:normalize /
+ * dataset:assemble shortcuts) can inject and call convert() directly — passing the same
+ * SymfonyStyle — while `import:convert` keeps working unchanged. This is the first step
+ * toward imports being initiated from dataset-bundle (import soft-depends on dataset).
+ */
 final class ImportConvertCommand
 {
     /** @var array<string,string> normalizedName => originalHeader */
@@ -67,7 +76,8 @@ final class ImportConvertCommand
     ) {
     }
 
-    public function __invoke(
+    #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
+    public function convert(
         SymfonyStyle $io,
 
         #[Argument('Input CSV/JSON/JSONL path (ZIP/GZ supported). Optional when --dataset is provided.')]
@@ -777,8 +787,9 @@ final class ImportConvertCommand
     {
         return match ($stage) {
             'raw'   => $this->canonicalRawInputPath($paths, $core),
-            'ai'     => rtrim($paths->datasetRoot, '/') . '/40_ai/' . $core . '.jsonl',
-            'enrich' => rtrim($paths->datasetRoot, '/') . '/60_enrich/' . $core . '.jsonl',
+            // TODO(bundle-refactor): ai claims belong in the vault (DataPaths::aiDir), not work.
+            'ai'     => rtrim($paths->datasetRoot, '/') . '/ai/' . $core . '.jsonl',
+            'enrich' => rtrim($paths->datasetRoot, '/') . '/' . Stage::Enrich->dir() . '/' . $core . '.jsonl',
             default => rtrim($paths->normalizedDir, '/') . '/' . $core . '.jsonl',
         };
     }
