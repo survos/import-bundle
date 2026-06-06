@@ -28,10 +28,18 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 
 use function array_filter;
+use function array_key_exists;
 use function array_values;
 use function explode;
+use function file_get_contents;
 use function in_array;
+use function is_array;
+use function is_file;
+use function is_numeric;
+use function is_scalar;
+use function json_decode;
 use function ltrim;
+use function max;
 use function preg_match;
 use function realpath;
 use function rtrim;
@@ -39,6 +47,7 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
+use function trim;
 use Survos\DatasetBundle\Entity\DatasetInfo;
 use Survos\DatasetBundle\Entity\Provider;
 use Survos\DatasetBundle\Enum\Stage;
@@ -402,6 +411,8 @@ final class ImportConvertCommand
             $rejectedCount = 0;
             $limitReached = false;
             $claimRows = $stage === 'enrich' && $paths !== null ? $this->claimRows($paths, $core) : [];
+            $estimatedRows = $this->estimateSourceRows($sourceInput, (string) $input, $sourceExt);
+            $this->startConvertProgress($io, $estimatedRows);
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
                 $attemptedCount++;
@@ -423,17 +434,21 @@ final class ImportConvertCommand
 
                 if ($row === null) {
                     $rejectedCount++;
+                    $this->advanceConvertProgress($io);
                     continue;
                 }
 
                 $writer->write($row);
                 $count++;
+                $this->advanceConvertProgress($io);
 
                 if ($limit !== null && $count >= $limit) {
                     $limitReached = true;
                     break;
                 }
             }
+
+            $this->finishConvertProgress($io);
 
             $convertedCount = $count;
 
@@ -537,6 +552,95 @@ final class ImportConvertCommand
         }
 
         return Command::SUCCESS;
+    }
+
+    private function startConvertProgress(SymfonyStyle $io, ?int $estimatedRows): void
+    {
+        $format = $estimatedRows === null || $estimatedRows <= 0
+            ? ' %current% [%bar%] elapsed:%elapsed:6s% memory:%memory:6s%'
+            : ' %current%/%max% [%bar%] %percent:3s%% elapsed:%elapsed:6s% estimated:%estimated:-6s% memory:%memory:6s%';
+
+        $io->progressStart($estimatedRows ?? 0, $format);
+    }
+
+    private function advanceConvertProgress(SymfonyStyle $io): void
+    {
+        $io->progressAdvance();
+    }
+
+    private function finishConvertProgress(SymfonyStyle $io): void
+    {
+        $io->progressFinish();
+    }
+
+    private function estimateSourceRows(string $sourceInput, string $input, string $sourceExt): ?int
+    {
+        $rows = $this->readSidecarRowCount($sourceInput, $sourceExt);
+        if ($rows !== null) {
+            return $rows;
+        }
+
+        if ($input !== $sourceInput) {
+            return $this->readSidecarRowCount($input, $sourceExt);
+        }
+
+        return null;
+    }
+
+    private function readSidecarRowCount(string $path, string $sourceExt): ?int
+    {
+        $sidecarPath = $path . '.sidecar.json';
+        if (!is_file($sidecarPath)) {
+            return null;
+        }
+
+        $json = file_get_contents($sidecarPath);
+        if ($json === false || trim($json) === '') {
+            return null;
+        }
+
+        $decoded = json_decode($json, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        foreach ([$decoded, $decoded['metadata'] ?? null, $decoded['sidecar'] ?? null, $decoded['file'] ?? null] as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+
+            $lineCount = $this->firstPositiveCount($candidate, ['lineCount', 'line_count', 'totalLines', 'total_lines', 'lines']);
+            if ($lineCount !== null) {
+                return $sourceExt === 'csv' ? max(0, $lineCount - 1) : $lineCount;
+            }
+
+            $rowCount = $this->firstPositiveCount($candidate, ['recordCount', 'record_count', 'rows', 'records', 'count', 'total']);
+            if ($rowCount !== null) {
+                return $rowCount;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param list<string> $keys
+     */
+    private function firstPositiveCount(array $data, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $data) || !is_scalar($data[$key]) || !is_numeric($data[$key])) {
+                continue;
+            }
+
+            $count = (int) $data[$key];
+            if ($count >= 0) {
+                return $count;
+            }
+        }
+
+        return null;
     }
 
     private function normalizeDumpRecord(bool|int $dump, SymfonyStyle $io): ?int
