@@ -178,7 +178,7 @@ final class ImportConvertCommand
             $failed = 0;
             foreach ($datasetKeys as $key) {
                 $io->section($key);
-                $result = $this(
+                $result = $this->convert(
                     $io,
                     dataset: $key,
                     limit: $limit,

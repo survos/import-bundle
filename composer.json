@@ -38,7 +38,8 @@
         "survos/dataset-bundle": "^2.5"
     },
     "suggest": {
-        "league/csv": "Required for CSV input, CSV output, and CSV profiling commands."
+        "league/csv": "Required for CSV input, CSV output, and CSV profiling commands.",
+        "halaxa/json-machine": "Stream large JSON files without loading them into memory."
     },
     "autoload": {
         "psr-4": {
