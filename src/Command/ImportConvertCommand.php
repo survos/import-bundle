@@ -17,6 +17,7 @@ use Survos\ImportBundle\IO\CsvWriter;
 use Survos\JsonlBundle\IO\JsonlReader;
 use Survos\JsonlBundle\IO\JsonlWriter;
 use Survos\JsonlBundle\Service\JsonlProfilerInterface;
+use Survos\JsonlBundle\Sqlite\SqlProfiler;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
@@ -24,6 +25,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 
@@ -82,6 +84,8 @@ final class ImportConvertCommand
         private readonly ?EventDispatcherInterface $dispatcher = null,
         private readonly ?JsonlProfilerInterface $profiler = null,
         private readonly ?EntityManagerInterface $entityManager = null,
+        private readonly ?SqlProfiler $sqlProfiler = null,
+        private readonly ?UrlGeneratorInterface $urlGenerator = null,
     ) {
     }
 
@@ -101,8 +105,11 @@ final class ImportConvertCommand
         #[Option('Treat input as JSONL and only generate the profile')]
         bool $profileOnly = false,
 
-        #[Option('Write a .profile.json alongside the output (default: true; use --no-save-profile to skip)')]
+        #[Option('Deprecated alias for --legacy-profile (writes the legacy .profile.json)')]
         ?bool $saveProfile = null,
+
+        #[Option('Also write the legacy in-memory .profile.json blob (the scalable .profile.db is always written)')]
+        bool $legacyProfile = false,
 
         #[Option('Dataset code (e.g. "wam", "marvel")')]
         ?string $dataset = null,
@@ -141,7 +148,10 @@ final class ImportConvertCommand
     ): int {
         $io->title('Import / Convert');
 
-        $saveProfile ??= true;
+        // The scalable SQL sidecar (.profile.db) is the canonical profile now. The
+        // legacy in-memory .profile.json (inlines sample rows, OOMs on big cores) is
+        // opt-in via --legacy-profile; --save-profile is kept as a deprecated alias.
+        $legacyProfile = $legacyProfile || ($saveProfile === true);
 
         $stage = strtolower(trim($stage));
         if (!in_array($stage, ['raw', 'normalize', 'ai', 'enrich'], true)) {
@@ -185,7 +195,7 @@ final class ImportConvertCommand
                     stage: $stage,
                     core: $core,
                     allCores: $allCores,
-                    saveProfile: $saveProfile,
+                    legacyProfile: $legacyProfile,
                     csv: $csv
                 );
                 if ($result !== Command::SUCCESS) {
@@ -245,7 +255,7 @@ final class ImportConvertCommand
                     $result = $this(
                         $io,
                         limit: $limit,
-                        saveProfile: $saveProfile,
+                        legacyProfile: $legacyProfile,
                         dataset: $dataset,
                         stage: $stage,
                         core: $rawCore,
@@ -281,12 +291,20 @@ final class ImportConvertCommand
             return Command::FAILURE;
         }
 
-        if (($dataset === null || $dataset === '') && $input !== null) {
+        // A "real" dataset is one the caller named (--dataset/--provider) or one we can
+        // infer because the input lives under APP_DATA_DIR. Only real datasets route their
+        // output/profile to canonical APP_DATA_DIR paths and update the dataset registry.
+        // A bare file elsewhere must NOT be relocated under APP_DATA_DIR (see #obj/obj bug).
+        $datasetExplicit = $dataset !== null && $dataset !== '';
+        $datasetInferredFromPath = false;
+        if (!$datasetExplicit && $input !== null) {
             $guessed = $this->inferDatasetFromInput($input);
             if ($guessed !== null) {
                 $dataset = $guessed;
+                $datasetInferredFromPath = true;
             }
         }
+        $realDataset = $datasetExplicit || $datasetInferredFromPath;
 
         // Determine dataset + source
         if (\is_dir($input)) {
@@ -301,20 +319,30 @@ final class ImportConvertCommand
             [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
         }
 
-        // If dataset is known and a factory exists, prefer canonical output/profile defaults —
-        // but only when the caller has NOT provided an explicit --output, so we don't route
-        // the profile to APP_DATA_DIR when the user just wants a simple file conversion.
-        if ($paths === null && $output === null && $dataset !== null && $dataset !== '' && $this->pathsFactory !== null) {
+        // If this is a real dataset and a factory exists, prefer canonical output/profile
+        // defaults — but only when the caller has NOT provided an explicit --output, so we
+        // don't route a simple file conversion to APP_DATA_DIR. A bare file with no --dataset
+        // stays next to its source (see sourceAdjacentJsonlPath).
+        if ($paths === null && $output === null && $realDataset && $dataset !== '' && $this->pathsFactory !== null) {
             $paths = $this->pathsFactory->for($dataset);
         }
 
-        $outputPath = $output ?? (
-            $paths ? $this->canonicalStagePath($paths, $stage, $core) : $this->defaultJsonlPath((string) $dataset)
-        );
+        $outputPath = $output ?? match (true) {
+            $paths !== null => $this->canonicalStagePath($paths, $stage, $core),
+            $realDataset    => $this->defaultJsonlPath((string) $dataset),
+            default         => $this->sourceAdjacentJsonlPath((string) $input),
+        };
 
         // Adjust output extension for CSV mode
         if ($csv) {
             $outputPath = $this->adjustExtensionForCsv($outputPath);
+        }
+
+        // Never overwrite the source during a bare conversion (e.g. file.jsonl → file.jsonl);
+        // resetOutput() would unlink the input before we read it.
+        if (!$profileOnly && \is_file($outputPath) && \is_file($sourceInput)
+            && \realpath($outputPath) === \realpath($sourceInput)) {
+            $outputPath = \preg_replace('/\.(jsonl|csv)$/i', '.converted.$1', $outputPath, 1);
         }
 
         $profilePath = $paths
@@ -345,13 +373,19 @@ final class ImportConvertCommand
         $baseTags[] = 'source:' . \basename($input);
         $baseTags   = \array_values(\array_unique(\array_merge($baseTags, $this->extraTags)));
 
-        if ($this->dispatcher) {
+        // Only a real dataset is reported to the registry / gets a browse link; a bare
+        // file conversion passes '' so the registry listener skips it.
+        $registryDataset = $realDataset ? (string) $dataset : '';
+
+        // Dataset-lifecycle events are only meaningful for a real dataset; a bare file
+        // conversion skips them (listeners build DataPaths from the dataset key).
+        if ($this->dispatcher && $registryDataset !== '') {
             $this->dispatcher->dispatch(
                 new ImportConvertStartedEvent(
                     $input,
                     $outputPath,
                     $profilePath,
-                    $dataset,
+                    $registryDataset,
                     $baseTags,
                     $limit,
                     $zipPath,
@@ -463,58 +497,81 @@ final class ImportConvertCommand
             ));
         }
 
-        // Profiling
-        $io->section(\sprintf('Profiling %s', $csv ? 'CSV' : 'JSONL'));
-        [$fieldsProfile, $recordCount, $uniqueFields, $samples, $extraFieldStats] = $this->buildProfile($outputPath, $limit);
+        $tags = $baseTags;
+        $hasExportTag = in_array('export:csv', $tags, true) || in_array('export.csv', $tags, true);
 
-        // Inject original header name if we know it
-        foreach ($fieldsProfile as $name => &$stats) {
-            if (isset($this->fieldOriginalNames[$name])) {
-                $stats['originalName'] = $this->fieldOriginalNames[$name];
+        // Canonical profile: the scalable SQL sidecar (<output>.db). Always written for
+        // JSONL output when the profiler is available — it streams the file (no OOM).
+        $recordCount = null;
+        if (!$csv && $this->sqlProfiler !== null && \is_file($outputPath)) {
+            $io->section('Profiling → SQL sidecar (.profile.db)');
+            $result = $this->sqlProfiler->profile($outputPath);
+            $recordCount = $result->rows;
+            $io->success(\sprintf(
+                'Profiled %d rows, %d fields → %s.db%s',
+                $result->rows,
+                $result->fields,
+                \basename($outputPath),
+                $result->invalid > 0 ? \sprintf(' (%d invalid skipped)', $result->invalid) : ''
+            ));
+        }
+
+        // Legacy in-memory profile.json — opt-in, but still required for CSV profiling
+        // and the export:csv tag (which reads samples/fields back from the json blob).
+        $writeLegacy = $legacyProfile || $csv || $hasExportTag;
+        if ($writeLegacy) {
+            $io->section(\sprintf('Legacy profiling %s', $csv ? 'CSV' : 'JSONL'));
+            [$fieldsProfile, $recordCount, $uniqueFields, $samples, $extraFieldStats] = $this->buildProfile($outputPath, $limit);
+
+            // Inject original header name if we know it
+            foreach ($fieldsProfile as $name => &$stats) {
+                if (isset($this->fieldOriginalNames[$name])) {
+                    $stats['originalName'] = $this->fieldOriginalNames[$name];
+                }
             }
-        }
-        unset($stats);
+            unset($stats);
 
-        $tags         = $baseTags;
-        $uniqueFields = \array_values($uniqueFields);
+            $uniqueFields = \array_values($uniqueFields);
 
-        if ($uniqueFields) {
-            $io->note('PK-like unique fields: ' . \implode(', ', $uniqueFields));
-        } elseif ($recordCount > 0) {
-            // Only warn about missing PK when there are actually records to index.
-            // 0-record collections are expected (e.g. all items filtered by rights).
-            $io->warning('No PK-like unique field detected (non-null, allowed chars, no duplicates).');
-            $io->writeln('  → You may need to fix the profile logic or provide a separate id field.');
-        }
+            if ($uniqueFields) {
+                $io->note('PK-like unique fields: ' . \implode(', ', $uniqueFields));
+            } elseif ($recordCount > 0) {
+                // Only warn about missing PK when there are actually records to index.
+                // 0-record collections are expected (e.g. all items filtered by rights).
+                $io->warning('No PK-like unique field detected (non-null, allowed chars, no duplicates).');
+                $io->writeln('  → You may need to fix the profile logic or provide a separate id field.');
+            }
 
-        $fullProfile = [
-            'input'        => $input,
-            'output'       => $outputPath,
-            'recordCount'  => $recordCount,
-            'requestedLimit' => $limit,
-            'attemptedCount' => $attemptedCount,
-            'convertedCount' => $convertedCount ?? null,
-            'rejectedCount' => $rejectedCount,
-            'limitReached' => $limitReached,
-            'tags'         => $tags,
-            'dataset'      => $dataset,
-            'uniqueFields' => $uniqueFields,
-            'fields'       => $fieldsProfile,
-            'samples'      => $samples,
-            'extraFields'  => $extraFieldStats,
-        ];
+            $fullProfile = [
+                'input'        => $input,
+                'output'       => $outputPath,
+                'recordCount'  => $recordCount,
+                'requestedLimit' => $limit,
+                'attemptedCount' => $attemptedCount,
+                'convertedCount' => $convertedCount ?? null,
+                'rejectedCount' => $rejectedCount,
+                'limitReached' => $limitReached,
+                'tags'         => $tags,
+                'dataset'      => $registryDataset,
+                'uniqueFields' => $uniqueFields,
+                'fields'       => $fieldsProfile,
+                'samples'      => $samples,
+                'extraFields'  => $extraFieldStats,
+            ];
 
-        if ($saveProfile) {
             $this->ensureDir($profilePath);
             \file_put_contents(
                 $profilePath,
                 \json_encode($fullProfile, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES)
             );
-            $io->success(\sprintf('Profile written to %s', $profilePath));
+            $io->success(\sprintf('Legacy profile written to %s', $profilePath));
         }
 
+        // Fall back to the converted row count when no profiler ran (CSV-less, profiler off).
+        $recordCount ??= $convertedCount ?? 0;
+
         $dispatchTags = $tags;
-        if (in_array('export:csv', $tags, true) || in_array('export.csv', $tags, true)) {
+        if ($hasExportTag) {
             try {
                 $result = $this->csvExporter->exportFromProfile(
                     $profilePath,
@@ -535,14 +592,14 @@ final class ImportConvertCommand
             ));
         }
 
-        if ($this->dispatcher) {
+        if ($this->dispatcher && $registryDataset !== '') {
             $this->dispatcher->dispatch(
                 new ImportConvertFinishedEvent(
                     $input,
                     $outputPath,
                     $profilePath,
                     $recordCount,
-                    $dataset,
+                    $registryDataset,
                     $dispatchTags,
                     $limit,
                     $zipPath,
@@ -551,7 +608,42 @@ final class ImportConvertCommand
             );
         }
 
+        // Hand the user a link to browse the dataset they just loaded.
+        if ($registryDataset !== '') {
+            $browseUrl = $this->browseUrl($registryDataset);
+            if ($browseUrl !== null) {
+                $io->writeln('');
+                $io->writeln(\sprintf('  Browse: <href=%s>%s</>', $browseUrl, $browseUrl));
+            }
+        }
+
         return Command::SUCCESS;
+    }
+
+    /**
+     * Build an absolute URL to browse a dataset (provider/code) in the UI, or null when
+     * no router is wired or the route is unavailable (import-bundle is UI-agnostic).
+     */
+    private function browseUrl(string $datasetKey): ?string
+    {
+        if ($this->urlGenerator === null) {
+            return null;
+        }
+
+        [$provider, $code] = \array_pad(\explode('/', $datasetKey, 2), 2, null);
+        if ($provider === null || $code === null || $code === '') {
+            return null;
+        }
+
+        try {
+            return $this->urlGenerator->generate(
+                'data_bundle_dataset_show',
+                ['provider' => $provider, 'code' => $code],
+                UrlGeneratorInterface::ABSOLUTE_URL
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function startConvertProgress(SymfonyStyle $io, ?int $estimatedRows): void
@@ -941,6 +1033,23 @@ final class ImportConvertCommand
     {
         $dir = \rtrim($this->dataDir, '/');
         return \sprintf('%s/%s.jsonl', $dir, $baseName);
+    }
+
+    /**
+     * Output path for a bare file conversion (no --dataset, no --output): a .jsonl sibling
+     * of the source, so we never relocate the user's file under APP_DATA_DIR.
+     */
+    private function sourceAdjacentJsonlPath(string $input): string
+    {
+        $dir      = \dirname($input);
+        $filename = \basename($input);
+
+        if (\str_ends_with(\strtolower($filename), '.gz')) {
+            $filename = \substr($filename, 0, -3);
+        }
+        $filename = \preg_replace('/\.(jsonl|json|csv)$/i', '', $filename, 1);
+
+        return \sprintf('%s/%s.jsonl', $dir, $filename);
     }
 
     private function defaultProfilePath(string $jsonlPath): string
