@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Survos\ImportBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\DependencyInjection\Attribute\Target;
 use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
@@ -83,7 +84,8 @@ final class ImportConvertCommand
         private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
         private readonly ?JsonlProfilerInterface $profiler = null,
-        private readonly ?EntityManagerInterface $entityManager = null,
+        // Provider/DatasetInfo live on the dataset EM, not the default one.
+        #[Target('dataset.entity_manager')] private readonly ?EntityManagerInterface $entityManager = null,
         private readonly ?SqlProfiler $sqlProfiler = null,
         private readonly ?UrlGeneratorInterface $urlGenerator = null,
     ) {
@@ -117,10 +119,10 @@ final class ImportConvertCommand
         #[Option('Dataset stage to write/read canonically: raw or normalize', name: 'stage')]
         string $stage = 'normalize',
 
-        #[Option('Dataset core filename stem (default: obj)', name: 'core')]
-        string $core = 'obj',
+        #[Option('Convert only this core stem (default: every core in _raw)', name: 'core')]
+        ?string $core = null,
 
-        #[Option('Convert every raw core JSONL file for the dataset')]
+        #[Option('Convert every raw core for the dataset (default when --core is omitted)')]
         bool $allCores = false,
 
         #[Option('Additional tags (comma-separated, e.g. "wikidata,youtube")', name: 'tags')]
@@ -160,11 +162,9 @@ final class ImportConvertCommand
         }
         $this->currentStage = $stage;
 
-        $core = trim($core);
-        if ($core === '') {
-            $io->error('The --core option cannot be empty.');
-            return Command::FAILURE;
-        }
+        // Default to discovering every core in _raw; --core restricts to one (the exception).
+        $allCores = $allCores || $core === null || trim((string) $core) === '';
+        $core = $allCores ? 'obj' : trim((string) $core); // 'obj' is a placeholder when discovering
 
         // Resolve dataset list: --provider populates from DB, --dataset is a single entry
         $datasetKeys = [];
@@ -252,7 +252,8 @@ final class ImportConvertCommand
                 $failed = 0;
                 foreach ($cores as $rawCore) {
                     $io->section(sprintf('%s / %s', $dataset, $rawCore));
-                    $result = $this(
+                    // Method-level #[AsCommand] lives on convert(); $this is not invokable.
+                    $result = $this->convert(
                         $io,
                         limit: $limit,
                         legacyProfile: $legacyProfile,
@@ -917,6 +918,13 @@ final class ImportConvertCommand
             return [];
         }
 
+        // Only filenames whose stem is a known core (obj, doc, image, per, place, …)
+        // count as cores — this excludes provider download shards like rg_54-12.jsonl.
+        $known = array_filter(
+            (new \ReflectionClass(\Survos\DataContracts\Vocabulary\Core::class))->getConstants(),
+            'is_string',
+        );
+
         $cores = [];
         foreach (new \DirectoryIterator($rawDir) as $file) {
             if (!$file->isFile()) {
@@ -925,6 +933,9 @@ final class ImportConvertCommand
 
             $name = $file->getFilename();
             if (preg_match('/^([A-Za-z0-9_-]+)\.jsonl(?:\.gz)?$/', $name, $matches) !== 1) {
+                continue;
+            }
+            if (!in_array($matches[1], $known, true)) {
                 continue;
             }
 
