@@ -110,6 +110,9 @@ final class ImportConvertCommand
         #[Option('Also write the legacy in-memory .profile.json blob (the scalable .profile.db is always written)')]
         bool $legacyProfile = false,
 
+        #[Option('Write the SQL profile sidecar (.db). OFF by default — pass --profile to generate field stats when designing maps; the slow pass is unneeded once maps are settled (zm re-profiles anyway)', name: 'profile')]
+        bool $profile = false,
+
         #[Option('Dataset code (e.g. "wam", "marvel")')]
         ?string $dataset = null,
 
@@ -501,15 +504,17 @@ final class ImportConvertCommand
         // Canonical profile: the scalable SQL sidecar (<output>.db). Always written for
         // JSONL output when the profiler is available — it streams the file (no OOM).
         $recordCount = null;
-        if (!$csv && $this->sqlProfiler !== null && \is_file($outputPath)) {
+        if ($profile && !$csv && $this->sqlProfiler !== null && \is_file($outputPath)) {
             $io->section('Profiling → SQL sidecar (.profile.db)');
+            $t0 = \microtime(true);
             $result = $this->sqlProfiler->profile($outputPath);
             $recordCount = $result->rows;
             $io->success(\sprintf(
-                'Profiled %d rows, %d fields → %s.db%s',
+                'Profiled %d rows, %d fields → %s.db in %.1fs%s',
                 $result->rows,
                 $result->fields,
                 \basename($outputPath),
+                \microtime(true) - $t0,
                 $result->invalid > 0 ? \sprintf(' (%d invalid skipped)', $result->invalid) : ''
             ));
         }
