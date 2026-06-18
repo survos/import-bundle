@@ -911,6 +911,18 @@ final class ImportConvertCommand
         }
 
         $result = array_keys($cores);
+
+        // Un-cored raw: a provider may write a single raw file named after the dataset itself
+        // (e.g. NARA's rg_101.jsonl) to mean "this isn't a known core". Now that every image is a
+        // Page (no separate image core), the obj/doc distinction barely matters, so the un-cored
+        // file defaults to the `doc` core (canonicalRawInputPath resolves the input file).
+        if ($result === []) {
+            $code = basename(\dirname($rawDir));
+            if ($code !== '' && (is_file("$rawDir/$code.jsonl") || is_file("$rawDir/$code.jsonl.gz"))) {
+                return ['doc'];
+            }
+        }
+
         usort($result, static function (string $left, string $right): int {
             if ($left === 'obj') {
                 return $right === 'obj' ? 0 : -1;
@@ -989,6 +1001,19 @@ final class ImportConvertCommand
         $gz = $base . '.gz';
         if (is_file($gz)) {
             return $gz;
+        }
+
+        // Un-cored raw named after the dataset itself (e.g. NARA rg_101.jsonl) — the input for the
+        // default core when no core-named file exists.
+        $code = basename(\dirname(rtrim($paths->rawDir, '/')));
+        if ($code !== '' && $code !== $core) {
+            $named = rtrim($paths->rawDir, '/') . '/' . $code . '.jsonl';
+            if (is_file($named)) {
+                return $named;
+            }
+            if (is_file($named . '.gz')) {
+                return $named . '.gz';
+            }
         }
 
         return $base;
