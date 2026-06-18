@@ -422,7 +422,13 @@ final class ImportConvertCommand
             $this->resetOutput($outputPath);
             $this->ensureDir($outputPath);
 
-            $io->section(\sprintf('Converting %s to %s (from %s)', $sourceExt, $csv ? 'CSV' : 'JSONL', $sourceInput));
+            $io->section(\sprintf('Converting %s → %s', $sourceExt, $csv ? 'CSV' : 'JSONL'));
+            // Show the source + destination up front (repeated in the success footer) so a run is
+            // self-documenting — you can see exactly which file fed which without scrolling.
+            $io->definitionList(
+                ['from' => $sourceInput],
+                ['to' => $outputPath],
+            );
 
             if ($csv) {
                 $writer = CsvWriter::open($outputPath);
@@ -488,10 +494,13 @@ final class ImportConvertCommand
             $convertedCount = $count;
 
             $writer->close();
+            $io->definitionList(
+                ['from' => $sourceInput],
+                ['to' => $outputPath],
+            );
             $io->success(\sprintf(
-                'Converted %d records to %s (attempted=%d, rejected=%d%s)',
+                'Converted %d records (attempted=%d, rejected=%d%s)',
                 $convertedCount,
-                $outputPath,
                 $attemptedCount,
                 $rejectedCount,
                 $limitReached ? ', limit reached' : ''
