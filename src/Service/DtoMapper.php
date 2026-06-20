@@ -99,12 +99,21 @@ final class DtoMapper
         $val = null;
 
         if ($map) {
-            if ($map->source !== null && array_key_exists($map->source, $record)) {
-                $val = $record[$map->source];
-            } elseif ($map->regex !== null) {
-                $val = $this->findByRegex($record, $map->regex);
-            } elseif (array_key_exists($prop->getName(), $record)) {
-                $val = $record[$prop->getName()];
+            // Multi-source aliases: first source key present with a non-null value wins.
+            $resolved = false;
+            foreach ($map->sources() as $sourceKey) {
+                if (array_key_exists($sourceKey, $record) && $record[$sourceKey] !== null) {
+                    $val = $record[$sourceKey];
+                    $resolved = true;
+                    break;
+                }
+            }
+            if (!$resolved) {
+                if ($map->regex !== null) {
+                    $val = $this->findByRegex($record, $map->regex);
+                } elseif (array_key_exists($prop->getName(), $record)) {
+                    $val = $record[$prop->getName()];
+                }
             }
 
             if ($map->if === 'isset' && $val === null) {
