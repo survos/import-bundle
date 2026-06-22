@@ -147,6 +147,9 @@ final class ImportConvertCommand
 
         #[Option('Dump raw and normalized row N and stop. Use --dump or --dump=1 for the first row.', name: 'dump')]
         bool|int $dump = false,
+
+        #[Option('During --stage=enrich, merge legacy 40_ai/<core>.jsonl before row listeners')]
+        bool $legacyClaimFile = true,
     ): int {
         $io->title('Import / Convert');
 
@@ -196,7 +199,8 @@ final class ImportConvertCommand
                     core: $core,
                     allCores: $allCores,
                     legacyProfile: $legacyProfile,
-                    csv: $csv
+                    csv: $csv,
+                    legacyClaimFile: $legacyClaimFile,
                 );
                 if ($result !== Command::SUCCESS) {
                     $failed++;
@@ -451,7 +455,7 @@ final class ImportConvertCommand
             $attemptedCount = 0;
             $rejectedCount = 0;
             $limitReached = false;
-            $claimRows = $stage === 'enrich' && $paths !== null ? $this->claimRows($paths, $core) : [];
+            $claimRows = $legacyClaimFile && $stage === 'enrich' && $paths !== null ? $this->claimRows($paths, $core) : [];
             $estimatedRows = $this->estimateSourceRows($sourceInput, (string) $input, $sourceExt);
             $this->startConvertProgress($io, $estimatedRows);
 
@@ -498,9 +502,19 @@ final class ImportConvertCommand
                 ['from' => $sourceInput],
                 ['to' => $outputPath],
             );
+            // Name the core + where it landed so it's clear which stage/core this run wrote — e.g.
+            // "100 per records → mus/cleveland/norm/per.jsonl". Relativise off the dataset key (robust
+            // against the /platform symlink vs the data dir) so the path stays short.
+            $coreName = ($core !== null && $core !== '') ? $core : \basename($outputPath, '.jsonl');
+            $relativeOutput = $outputPath;
+            if ($dataset !== null && $dataset !== '' && ($pos = \strpos($outputPath, '/' . $dataset . '/')) !== false) {
+                $relativeOutput = \substr($outputPath, $pos + 1);
+            }
             $io->success(\sprintf(
-                'Converted %d records (attempted=%d, rejected=%d%s)',
+                'Converted %d %s records → %s (attempted=%d, rejected=%d%s)',
                 $convertedCount,
+                $coreName,
+                $relativeOutput,
                 $attemptedCount,
                 $rejectedCount,
                 $limitReached ? ', limit reached' : ''
