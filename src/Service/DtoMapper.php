@@ -68,6 +68,34 @@ final class DtoMapper
         return $out;
     }
 
+    /**
+     * Raw source keys this DTO's #[Map(source: …)] attributes pull from that differ from the
+     * property's own name — i.e. keys that get RENAMED into a property. After mapping, the caller
+     * can drop these from the record so a consumed source key (e.g. snake `subject_facet`) doesn't
+     * linger beside the camelCase property it fed (`subjects`) and pollute the normalized row — the
+     * source-DTO analogue of BaseItemDto dropping consumed aliases from its extras.
+     *
+     * @param class-string $dtoClass
+     * @return list<string>
+     */
+    public function aliasSourceKeys(string $dtoClass): array
+    {
+        $keys = [];
+        foreach ((new ReflectionClass($dtoClass))->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
+            $map = $this->getAttribute($prop, MapAttr::class);
+            if ($map === null) {
+                continue;
+            }
+            foreach ($map->sources() as $src) {
+                if ($src !== $prop->getName()) {
+                    $keys[$src] = true;
+                }
+            }
+        }
+
+        return array_keys($keys);
+    }
+
     private function applyArray(object $dto, array $data): void
     {
         $rc = new ReflectionClass($dto);
