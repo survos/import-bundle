@@ -656,10 +656,106 @@ final class ImportConvertCommand
         }
 
         if ($input !== $sourceInput) {
-            return $this->readSidecarRowCount($input, $sourceExt);
+            $rows = $this->readSidecarRowCount($input, $sourceExt);
+            if ($rows !== null) {
+                return $rows;
+            }
         }
 
-        return null;
+        return $this->estimateRowsFromSourceFile($sourceInput, $sourceExt);
+    }
+
+    private function estimateRowsFromSourceFile(string $path, string $sourceExt): ?int
+    {
+        if (!in_array($sourceExt, ['csv', 'jsonl'], true) || !is_file($path)) {
+            return null;
+        }
+
+        if (str_ends_with($path, '.gz')) {
+            return $this->estimateGzipRows($path, $sourceExt);
+        }
+
+        $lines = $this->countPlainLines($path);
+        if ($lines === null) {
+            return null;
+        }
+
+        return $sourceExt === 'csv' ? max(0, $lines - 1) : $lines;
+    }
+
+    private function countPlainLines(string $path): ?int
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            return null;
+        }
+
+        $lines = 0;
+        while (fgets($handle) !== false) {
+            $lines++;
+        }
+        fclose($handle);
+
+        return $lines;
+    }
+
+    private function estimateGzipRows(string $path, string $sourceExt): ?int
+    {
+        // GZIP stores the uncompressed size in the footer; combine it with a small
+        // decompressed line sample to avoid a full pre-scan of large .jsonl.gz files.
+        $uncompressedSize = $this->gzipUncompressedSize($path);
+        if ($uncompressedSize === null || $uncompressedSize <= 0) {
+            return null;
+        }
+
+        $gz = gzopen($path, 'rb');
+        if ($gz === false) {
+            return null;
+        }
+
+        $lines = 0;
+        $bytes = 0;
+        while (!gzeof($gz) && $lines < 1000) {
+            $line = gzgets($gz);
+            if ($line === false) {
+                break;
+            }
+
+            $lines++;
+            $bytes += strlen($line);
+        }
+        gzclose($gz);
+
+        if ($lines === 0 || $bytes === 0) {
+            return null;
+        }
+
+        $estimatedLines = (int) max($lines, round($uncompressedSize / ($bytes / $lines)));
+
+        return $sourceExt === 'csv' ? max(0, $estimatedLines - 1) : $estimatedLines;
+    }
+
+    private function gzipUncompressedSize(string $path): ?int
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false || fseek($handle, -4, SEEK_END) !== 0) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+
+            return null;
+        }
+
+        $footer = fread($handle, 4);
+        fclose($handle);
+
+        if ($footer === false || strlen($footer) !== 4) {
+            return null;
+        }
+
+        $data = unpack('Vsize', $footer);
+
+        return is_array($data) ? (int) $data['size'] : null;
     }
 
     private function readSidecarRowCount(string $path, string $sourceExt): ?int
