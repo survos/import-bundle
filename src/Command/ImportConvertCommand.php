@@ -461,20 +461,24 @@ final class ImportConvertCommand
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
                 $attemptedCount++;
+                // Pre-step differs by stage: enrich merges any legacy 40_ai claims onto the already-
+                // normalized row; normalize maps the raw row. Both then dispatch the row event so the
+                // stage's listeners run — crucially, enrich must dispatch too, or the DB-backed
+                // AiEnrichRowListener (shared-claims projection) never fires.
                 if ($stage === 'enrich') {
                     $row = $this->mergeClaims($row, $claimRows);
                 } else {
                     $row = $this->rowNormalizer->normalizeRow($row);
-
-                    $row = $this->applyRowCallbacks(
-                        $row,
-                        $input,
-                        $sourceExt,
-                        $dataset,
-                        $index,
-                        $applyProfilePath
-                    );
                 }
+
+                $row = $this->applyRowCallbacks(
+                    $row,
+                    $input,
+                    $sourceExt,
+                    $dataset,
+                    $index,
+                    $applyProfilePath
+                );
                 $index++;
 
                 if ($row === null) {
