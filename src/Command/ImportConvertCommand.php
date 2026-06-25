@@ -150,6 +150,9 @@ final class ImportConvertCommand
 
         #[Option('During --stage=enrich, merge legacy 40_ai/<core>.jsonl before row listeners')]
         bool $legacyClaimFile = true,
+
+        #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`); preferred over the legacy 40_ai file. dataset:enrich supplies it automatically.')]
+        ?string $claimsFile = null,
     ): int {
         $io->title('Import / Convert');
 
@@ -455,7 +458,16 @@ final class ImportConvertCommand
             $attemptedCount = 0;
             $rejectedCount = 0;
             $limitReached = false;
-            $claimRows = $legacyClaimFile && $stage === 'enrich' && $paths !== null ? $this->claimRows($paths, $core) : [];
+            // Enrich folds claims onto rows. Prefer the vault claims.jsonl (canonical, from
+            // `claims:fetch`) so we never hit the live claims DB; fall back to the legacy 40_ai file.
+            $claimRows = [];
+            if ($stage === 'enrich') {
+                if ($claimsFile !== null && is_file($claimsFile)) {
+                    $claimRows = $this->claimRowsFromVault($claimsFile);
+                } elseif ($legacyClaimFile && $paths !== null) {
+                    $claimRows = $this->claimRows($paths, $core);
+                }
+            }
             $estimatedRows = $this->estimateSourceRows($sourceInput, (string) $input, $sourceExt);
             $this->startConvertProgress($io, $estimatedRows);
 
@@ -874,6 +886,49 @@ final class ImportConvertCommand
     }
 
     /**
+     * Read the vault claims.jsonl (canonical one-row-per-claim, as written by `claims:fetch`)
+     * into the same per-subject shape {@see mergeClaims()} consumes. The file is ordered
+     * newest-first per subject, so the first value seen per (subjectId, predicate) wins
+     * (manifesting — matches ClaimReader::manifestedForSubjects). This is the vault-file path
+     * that lets enrich fold claims without touching the live claims DB.
+     *
+     * @return array<string,list<array{predicate:string,value:mixed}>>
+     */
+    private function claimRowsFromVault(string $claimsFile): array
+    {
+        if (!is_file($claimsFile)) {
+            return [];
+        }
+
+        $claimsById = [];
+        $seen = [];
+        foreach (JsonlReader::open($claimsFile) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $id = $row['subjectId'] ?? $row['subject_id'] ?? null;
+            $predicate = $row['predicate'] ?? null;
+            if (!is_scalar($id) || !is_string($predicate) || !array_key_exists('value', $row)) {
+                continue;
+            }
+
+            $key = (string) $id . '|' . $predicate;
+            if (isset($seen[$key])) {
+                continue; // already took the newest value for this subject+predicate
+            }
+            $seen[$key] = true;
+
+            $claimsById[(string) $id][] = [
+                'predicate' => $predicate,
+                'value' => $row['value'],
+            ];
+        }
+
+        return $claimsById;
+    }
+
+    /**
      * @param array<string,mixed> $row
      * @param array<string,list<array{predicate:string,value:mixed}>> $claimRows
      * @return array<string,mixed>
@@ -889,7 +944,19 @@ final class ImportConvertCommand
             $row[$claim['predicate']] = $claim['value'];
         }
 
+        // Assert the AI dense summary as the canonical description when the source has none, so the
+        // search card + detail render it as native data (the claim keeps provenance separately). We
+        // only fill an empty description — a real source description is never clobbered.
+        if (self::isBlank($row[ItemField::DESCRIPTION] ?? null) && !self::isBlank($row[ItemField::DENSE_SUMMARY] ?? null)) {
+            $row[ItemField::DESCRIPTION] = $row[ItemField::DENSE_SUMMARY];
+        }
+
         return $row;
+    }
+
+    private static function isBlank(mixed $value): bool
+    {
+        return $value === null || $value === [] || (is_string($value) && trim($value) === '');
     }
 
     private function dumpRecord(
