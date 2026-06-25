@@ -148,10 +148,7 @@ final class ImportConvertCommand
         #[Option('Dump raw and normalized row N and stop. Use --dump or --dump=1 for the first row.', name: 'dump')]
         bool|int $dump = false,
 
-        #[Option('During --stage=enrich, merge legacy 40_ai/<core>.jsonl before row listeners')]
-        bool $legacyClaimFile = true,
-
-        #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`); preferred over the legacy 40_ai file. dataset:enrich supplies it automatically.')]
+        #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`/`claims:export`). dataset:enrich supplies it automatically.')]
         ?string $claimsFile = null,
     ): int {
         $io->title('Import / Convert');
@@ -203,7 +200,6 @@ final class ImportConvertCommand
                     allCores: $allCores,
                     legacyProfile: $legacyProfile,
                     csv: $csv,
-                    legacyClaimFile: $legacyClaimFile,
                 );
                 if ($result !== Command::SUCCESS) {
                     $failed++;
@@ -458,15 +454,12 @@ final class ImportConvertCommand
             $attemptedCount = 0;
             $rejectedCount = 0;
             $limitReached = false;
-            // Enrich folds claims onto rows. Prefer the vault claims.jsonl (canonical, from
-            // `claims:fetch`) so we never hit the live claims DB; fall back to the legacy 40_ai file.
+            // Enrich folds claims onto rows from the vault claims.jsonl ONLY (canonical, populated by
+            // claims:fetch/claims:export). The legacy 40_ai file is gone — it dropped observation prose
+            // and could stale-shadow the vault. No claims file → rows pass through unenriched.
             $claimRows = [];
-            if ($stage === 'enrich') {
-                if ($claimsFile !== null && is_file($claimsFile)) {
-                    $claimRows = $this->claimRowsFromVault($claimsFile);
-                } elseif ($legacyClaimFile && $paths !== null) {
-                    $claimRows = $this->claimRows($paths, $core);
-                }
+            if ($stage === 'enrich' && $claimsFile !== null && is_file($claimsFile)) {
+                $claimRows = $this->claimRowsFromVault($claimsFile);
             }
             $estimatedRows = $this->estimateSourceRows($sourceInput, (string) $input, $sourceExt);
             $this->startConvertProgress($io, $estimatedRows);
@@ -849,43 +842,6 @@ final class ImportConvertCommand
     }
 
     /**
-     * @return array<string,list<array{predicate:string,value:mixed}>>
-     */
-    private function claimRows(\Survos\ImportBundle\Model\DatasetPaths $paths, string $core): array
-    {
-        $file = rtrim($paths->datasetRoot, '/') . '/40_ai/' . $core . '.jsonl';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $claimsById = [];
-        foreach (JsonlReader::open($file) as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-
-            $id = $row['id'] ?? null;
-            $claims = $row['claims'] ?? null;
-            if (!is_scalar($id) || !is_array($claims)) {
-                continue;
-            }
-
-            foreach ($claims as $claim) {
-                if (!is_array($claim) || !is_string($claim['predicate'] ?? null) || !array_key_exists('value', $claim)) {
-                    continue;
-                }
-
-                $claimsById[(string) $id][] = [
-                    'predicate' => $claim['predicate'],
-                    'value' => $claim['value'],
-                ];
-            }
-        }
-
-        return $claimsById;
-    }
-
-    /**
      * Read the vault claims.jsonl (canonical one-row-per-claim, as written by `claims:fetch`)
      * into the same per-subject shape {@see mergeClaims()} consumes. The file is ordered
      * newest-first per subject, so the first value seen per (subjectId, predicate) wins
@@ -944,11 +900,21 @@ final class ImportConvertCommand
             $row[$claim['predicate']] = $claim['value'];
         }
 
-        // Assert the AI dense summary as the canonical description when the source has none, so the
-        // search card + detail render it as native data (the claim keeps provenance separately). We
-        // only fill an empty description — a real source description is never clobbered.
-        if (self::isBlank($row[ItemField::DESCRIPTION] ?? null) && !self::isBlank($row[ItemField::DENSE_SUMMARY] ?? null)) {
-            $row[ItemField::DESCRIPTION] = $row[ItemField::DENSE_SUMMARY];
+        // Assert AI-derived fields onto canonical DTO slots when the source lacks them, so search +
+        // detail treat them as native data (the claims keep provenance separately). We only fill an
+        // EMPTY field — a real source title/description is never clobbered.
+        $denseSummary = $row[ItemField::DENSE_SUMMARY] ?? null;
+        if (self::isBlank($row[ItemField::DESCRIPTION] ?? null) && !self::isBlank($denseSummary)) {
+            $row[ItemField::DESCRIPTION] = $denseSummary;
+        }
+        if (self::isBlank($row[ItemField::TITLE] ?? null) && !self::isBlank($row['ai:caption'] ?? null)) {
+            $row[ItemField::TITLE] = $row['ai:caption'];
+        }
+        // searchSummary is the field the folio FTS always indexes. Seed it from the dense summary
+        // (purpose-built "for search and chat") so AI text is findable even though it isn't a
+        // declared/searchable source column — without it, searching the summary returns nothing.
+        if (self::isBlank($row[ItemField::SEARCH_SUMMARY] ?? null) && !self::isBlank($denseSummary)) {
+            $row[ItemField::SEARCH_SUMMARY] = $denseSummary;
         }
 
         return $row;
