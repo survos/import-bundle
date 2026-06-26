@@ -897,7 +897,7 @@ final class ImportConvertCommand
         }
 
         foreach ($claimRows[(string) $id] ?? [] as $claim) {
-            $row[$claim['predicate']] = $claim['value'];
+            $row[$claim['predicate']] = self::decodeClaimValue($claim['value']);
         }
 
         // Assert AI-derived fields onto canonical DTO slots when the source lacks them, so search +
@@ -923,6 +923,27 @@ final class ImportConvertCommand
     private static function isBlank(mixed $value): bool
     {
         return $value === null || $value === [] || (is_string($value) && trim($value) === '');
+    }
+
+    /**
+     * Some claim writers store scalar string values double-JSON-encoded (e.g. ai:observationProse as
+     * "..\n.." — wrapping quotes + literal backslash-n, not real newlines). Decode that one level so
+     * the value is clean prose; leave everything else (already-clean strings, arrays) untouched.
+     */
+    private static function decodeClaimValue(mixed $value): mixed
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+        $trimmed = trim($value);
+        if (\strlen($trimmed) >= 2 && $trimmed[0] === '"' && str_ends_with($trimmed, '"')) {
+            $decoded = json_decode($trimmed, true);
+            if (is_string($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return $value;
     }
 
     private function dumpRecord(
