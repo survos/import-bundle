@@ -466,6 +466,16 @@ final class ImportConvertCommand
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
                 $attemptedCount++;
+                // Long-batch safety valve. The per-row path is pure streaming (read → normalize →
+                // dispatch → write, nothing retained), but the heavy per-row churn — reflection,
+                // #[Map] DTOs, row events — produces cyclic garbage faster than PHP's default GC
+                // threshold reclaims it, so the high-water mark climbs to the memory_limit and OOMs
+                // mid-run on million-row datasets (e.g. smith/nmah). It only ever bites at scale, in
+                // a background task, where no one is watching. An explicit periodic collection bounds
+                // the high-water mark; it's negligible next to the row work.
+                if (($attemptedCount % 20000) === 0) {
+                    gc_collect_cycles();
+                }
                 // Pre-step differs by stage: enrich merges any legacy 40_ai claims onto the already-
                 // normalized row; normalize maps the raw row. Both then dispatch the row event so the
                 // stage's listeners run — crucially, enrich must dispatch too, or the DB-backed
