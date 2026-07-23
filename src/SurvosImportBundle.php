@@ -82,6 +82,7 @@ class SurvosImportBundle extends AbstractBundle
         $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonRowProvider::class)->setAutoconfigured(true);
         $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonlRowProvider::class)->setAutoconfigured(true);
         $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonDirRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(\Survos\ImportBundle\Service\Provider\XlsxRowProvider::class)->setAutoconfigured(true);
 
 
         $builder->registerForAutoconfiguration(RowProviderInterface::class)

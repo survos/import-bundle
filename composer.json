@@ -34,11 +34,13 @@
         "league/csv": "^9.27",
         "halaxa/json-machine": "^1.2",
         "symfony/validator": "^8.1",
-        "survos/dataset-bundle": "^2.5"
+        "survos/dataset-bundle": "^2.5",
+        "phpoffice/phpspreadsheet": "^5.8"
     },
     "suggest": {
         "league/csv": "Required for CSV input, CSV output, and CSV profiling commands.",
-        "halaxa/json-machine": "Stream large JSON files without loading them into memory."
+        "halaxa/json-machine": "Stream large JSON files without loading them into memory.",
+        "phpoffice/phpspreadsheet": "Required for XLSX/XLS input."
     },
     "autoload": {
         "psr-4": {
