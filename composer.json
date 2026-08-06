@@ -13,7 +13,7 @@
         "symfony/dependency-injection": "^8.1",
         "symfony/http-kernel": "^8.1",
         "symfony/stopwatch": "^8.1",
-        "twig/twig": "^3.4",
+        "twig/twig": "^3.4|^4.0",
         "symfony/type-info": "^8.1",
         "symfony/property-access": "^8.1",
         "survos/field-bundle": "^2.5",
