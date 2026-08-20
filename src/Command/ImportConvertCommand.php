@@ -246,9 +246,13 @@ final class ImportConvertCommand
                     return Command::FAILURE;
                 }
 
-                $cores = $this->discoverRawCores($paths);
+                $cores = $this->discoverCores($paths, $stage);
                 if ($cores === []) {
-                    $io->error(sprintf('No raw core JSONL files found in %s.', $paths->rawDir));
+                    $io->error(sprintf(
+                        'No %s core JSONL files found in %s.',
+                        self::inputStage($stage),
+                        self::inputStage($stage) === 'raw' ? $paths->rawDir : $paths->normalizedDir,
+                    ));
                     return Command::FAILURE;
                 }
 
@@ -1055,24 +1059,85 @@ final class ImportConvertCommand
 
 
     /**
+     * Row-bearing streams that normalize writes which are not folio Cores.
+     *
+     * `page` never appears in a /folio/{…}/{coreCode}/ URL, so it is deliberately absent from
+     * Core — but it *is* a stream of rows that enrich listeners must be shown, because that is
+     * where imagery lives (mediary's width/height and the archived S3 copy land on the page, not
+     * on the object row). term/termSet/link/linkType are deliberately NOT here: folio:build reads
+     * those straight out of norm/, so enriching them would write _folio files nothing ever opens.
+     */
+    private const NON_CORE_ROW_STREAMS = ['page'];
+
+    /**
+     * Cores to convert when --all-cores is in play, discovered from the stage this run READS.
+     *
+     * raw→normalize discovers in _raw; normalize→ai/enrich discovers in norm/. Getting this wrong
+     * is not a no-op: enrich used to discover in _raw, which only ever holds what the provider
+     * downloaded, so `page` — a stream normalize *manufactures* — could never be found and the
+     * enrich stage silently ran over the object core alone. Every folio in the fleet ended up with
+     * pages that had a mediaId, a NULL width and an upstream url, and it looked like a sync
+     * failure rather than a core that was never presented.
+     *
+     * @return list<string>
+     */
+    private function discoverCores(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage): array
+    {
+        return self::inputStage($stage) === 'raw'
+            ? $this->discoverRawCores($paths)
+            : $this->discoverNormalizedCores($paths);
+    }
+
+    /**
      * @return list<string>
      */
     private function discoverRawCores(\Survos\ImportBundle\Model\DatasetPaths $paths): array
     {
         $rawDir = rtrim($paths->rawDir, '/');
-        if (!is_dir($rawDir)) {
-            return [];
-        }
 
         // Only filenames whose stem is a known core (obj, doc, image, per, place, …)
         // count as cores — this excludes provider download shards like rg_54-12.jsonl.
-        $known = array_filter(
-            (new \ReflectionClass(\Survos\DataContracts\Vocabulary\Core::class))->getConstants(),
-            'is_string',
+        $result = $this->coresInDir($rawDir, self::knownCores());
+
+        // Un-cored raw: a provider may write a single raw file named after the dataset itself
+        // (e.g. NARA's rg_101.jsonl) to mean "this isn't a known core". Now that every image is a
+        // Page (no separate image core), the obj/doc distinction barely matters, so the un-cored
+        // file defaults to the `doc` core (canonicalRawInputPath resolves the input file).
+        if ($result === []) {
+            $code = basename(\dirname($rawDir));
+            if ($code !== '' && (is_file("$rawDir/$code.jsonl") || is_file("$rawDir/$code.jsonl.gz"))) {
+                return ['doc'];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function discoverNormalizedCores(\Survos\ImportBundle\Model\DatasetPaths $paths): array
+    {
+        // No un-cored fallback here, unlike raw: normalize always writes canonical stem names, so
+        // a file it didn't name after a core isn't one (tr.<locale>.jsonl, for instance).
+        return $this->coresInDir(
+            rtrim($paths->normalizedDir, '/'),
+            [...self::knownCores(), ...self::NON_CORE_ROW_STREAMS],
         );
+    }
+
+    /**
+     * @param list<string> $known
+     * @return list<string>
+     */
+    private function coresInDir(string $dir, array $known): array
+    {
+        if (!is_dir($dir)) {
+            return [];
+        }
 
         $cores = [];
-        foreach (new \DirectoryIterator($rawDir) as $file) {
+        foreach (new \DirectoryIterator($dir) as $file) {
             if (!$file->isFile()) {
                 continue;
             }
@@ -1090,17 +1155,6 @@ final class ImportConvertCommand
 
         $result = array_keys($cores);
 
-        // Un-cored raw: a provider may write a single raw file named after the dataset itself
-        // (e.g. NARA's rg_101.jsonl) to mean "this isn't a known core". Now that every image is a
-        // Page (no separate image core), the obj/doc distinction barely matters, so the un-cored
-        // file defaults to the `doc` core (canonicalRawInputPath resolves the input file).
-        if ($result === []) {
-            $code = basename(\dirname($rawDir));
-            if ($code !== '' && (is_file("$rawDir/$code.jsonl") || is_file("$rawDir/$code.jsonl.gz"))) {
-                return ['doc'];
-            }
-        }
-
         usort($result, static function (string $left, string $right): int {
             if ($left === 'obj') {
                 return $right === 'obj' ? 0 : -1;
@@ -1113,6 +1167,15 @@ final class ImportConvertCommand
         });
 
         return array_values($result);
+    }
+
+    /** @return list<string> */
+    private static function knownCores(): array
+    {
+        return array_values(array_filter(
+            (new \ReflectionClass(\Survos\DataContracts\Vocabulary\Core::class))->getConstants(),
+            'is_string',
+        ));
     }
 
     private function inferDatasetFromInput(string $input): ?string
