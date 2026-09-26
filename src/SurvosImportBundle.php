@@ -37,14 +37,18 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Kernel\RequiredBundle;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DependencyInjection\Reference;
-use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
+use Survos\Kit\AbstractSurvosBundle;
+use Survos\Kit\SurvosKitBundle;
 
 
 #[RequiredBundle(\Survos\DimensionsBundle\SurvosDimensionsBundle::class, ignoreOnInvalid: true)]
-class SurvosImportBundle extends AbstractBundle
+#[RequiredBundle(SurvosKitBundle::class)]
+// Symfony\Component\HttpKernel\Bundle\Bundle <-- Flex auto-registration marker (see Survos\Kit\AbstractSurvosBundle)
+class SurvosImportBundle extends AbstractSurvosBundle
 {
     public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void
     {
+        parent::prependExtension($container, $builder);
         if ($builder->hasExtension('doctrine')) {
             $builder->prependExtensionConfig('doctrine', [
                 'orm' => [
@@ -64,6 +68,7 @@ class SurvosImportBundle extends AbstractBundle
 
     public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
     {
+        parent::loadExtension($config, $container, $builder);
 
         $builder->autowire(RowProviderRegistry::class)
             ->setPublic(true)
@@ -120,20 +125,8 @@ class SurvosImportBundle extends AbstractBundle
             ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
 
-        $builder->autowire(ImportBrowseCommand::class)
-            ->setPublic(true)
-            ->setAutoconfigured(true)
-            ->addTag('console.command');
 
-        $builder->autowire(ImportFilesystemCommand::class)
-            ->setPublic(true)
-            ->setAutoconfigured(true)
-            ->addTag('console.command');
 
-        $builder->autowire(ImportDirCommand::class)
-            ->setPublic(true)
-            ->setAutoconfigured(true)
-            ->addTag('console.command');
 
         $builder->autowire(ProbeService::class)
             ->setPublic(true)

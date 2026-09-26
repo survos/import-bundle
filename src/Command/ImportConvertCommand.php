@@ -294,6 +294,7 @@ final class ImportConvertCommand
             return Command::FAILURE;
         }
 
+        $input = \Survos\JsonlBundle\Util\Jsonl::resolvePath($input);
         if (!\is_file($input) && !\is_dir($input)) {
             $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
             return Command::FAILURE;
