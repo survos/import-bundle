@@ -85,6 +85,7 @@ final class ImportConvertCommand
         #[Target('dataset.entity_manager')] private readonly ?EntityManagerInterface $entityManager = null,
         private readonly ?SqlProfiler $sqlProfiler = null,
         private readonly ?UrlGeneratorInterface $urlGenerator = null,
+        private readonly int|string|bool|null $workCompression = false,
     ) {
     }
 
@@ -286,7 +287,7 @@ final class ImportConvertCommand
             $input = $this->canonicalStagePath($paths, $inputStage, $core);
 
             // Prefer canonical stage output unless caller provided --output
-            $output ??= $this->canonicalStagePath($paths, $stage, $core);
+            $output ??= $this->canonicalOutputPath($paths, $stage, $core);
         }
 
         if ($input === null || $input === '') {
@@ -337,7 +338,7 @@ final class ImportConvertCommand
         }
 
         $outputPath = $output ?? match (true) {
-            $paths !== null => $this->canonicalStagePath($paths, $stage, $core),
+            $paths !== null => $this->canonicalOutputPath($paths, $stage, $core),
             $realDataset    => $this->defaultJsonlPath((string) $dataset),
             default         => $this->sourceAdjacentJsonlPath((string) $input),
         };
@@ -427,7 +428,7 @@ final class ImportConvertCommand
             }
 
             // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
-            $this->resetOutput($outputPath);
+            $this->resetOutput($outputPath, $sourceInput);
             $this->ensureDir($outputPath);
 
             $io->section(\sprintf('Converting %s → %s', $sourceExt, $csv ? 'CSV' : 'JSONL'));
@@ -529,7 +530,7 @@ final class ImportConvertCommand
             // Name the core + where it landed so it's clear which stage/core this run wrote — e.g.
             // "100 per records → mus/cleveland/norm/per.jsonl". Relativise off the dataset key (robust
             // against the /platform symlink vs the data dir) so the path stays short.
-            $coreName = ($core !== null && $core !== '') ? $core : \basename($outputPath, '.jsonl');
+            $coreName = ($core !== null && $core !== '') ? $core : (string) \preg_replace('/\.jsonl(\.gz)?$/', '', \basename($outputPath));
             $relativeOutput = $outputPath;
             if ($dataset !== null && $dataset !== '' && ($pos = \strpos($outputPath, '/' . $dataset . '/')) !== false) {
                 $relativeOutput = \substr($outputPath, $pos + 1);
@@ -1212,6 +1213,18 @@ final class ImportConvertCommand
         return null;
     }
 
+    /**
+     * Where a dataset stage is written: canonicalStagePath() with the work_compression suffix, so
+     * normalize/enrich/ai output is gzipped from the start and nothing has to compress it later.
+     * Raw is never rewritten here. Inputs keep canonicalStagePath(); readers find the .gz twin.
+     */
+    private function canonicalOutputPath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
+    {
+        $path = $this->canonicalStagePath($paths, $stage, $core);
+
+        return $stage === 'raw' ? $path : \Survos\JsonlBundle\Util\Jsonl::outputPath($path, \Survos\JsonlBundle\Util\Jsonl::compression($this->workCompression));
+    }
+
     private function canonicalStagePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
     {
         return match ($stage) {
@@ -1322,10 +1335,21 @@ final class ImportConvertCommand
         }
     }
 
-    private function resetOutput(string $output): void
+    private function resetOutput(string $output, ?string $source = null): void
     {
         if (\is_file($output)) {
             \unlink($output);
+        }
+        // Drop the other encoding too: readers prefer a plain file over its .gz, so a stale
+        // twin would shadow (or be shadowed by) what this run writes.
+        if (\preg_match('/\.jsonl(\.gz)?$/', $output)) {
+            $twin = \str_ends_with($output, '.gz') ? \substr($output, 0, -3) : $output.'.gz';
+            $isSource = $source !== null && \is_file($twin) && \is_file($source) && \realpath($twin) === \realpath($source);
+            foreach ($isSource ? [] : [$twin, $twin.'.db'] as $stale) {
+                if (\is_file($stale)) {
+                    \unlink($stale);
+                }
+            }
         }
         $idx = $output . '.idx.json';
         if (\is_file($idx)) {

@@ -111,7 +111,8 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $builder->autowire(ImportConvertCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
-            ->setArgument('$dataDir', $config['dir']);
+            ->setArgument('$dataDir', $config['dir'])
+            ->setArgument('$workCompression', $config['work_compression']);
 
         $builder->autowire(ImportProfileReportCommand::class)
             ->setPublic(true)
@@ -215,6 +216,10 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $definition->rootNode()
             ->children()
                 ->scalarNode('dir')->info('Default directory for data files')->defaultValue('data')->end()
+                ->scalarNode('work_compression')
+                    ->info('Dataset stage output (normalize, enrich, ai): false writes <core>.jsonl; 0-9 writes <core>.jsonl.gz at that gzip level')
+                    ->defaultFalse()
+                ->end()
                 ->arrayNode('dto_namespace_roots')
                     ->info('Namespace roots for convention-based DTO class resolution (e.g. App\\Dto)')
                     ->scalarPrototype()->end()
