@@ -10,7 +10,7 @@ use Survos\ImportBundle\Entity\FetchRecord;
 use Survos\ImportBundle\Event\FetchPageFetchedEvent;
 use Survos\ImportBundle\Event\FetchPageStoredEvent;
 use Survos\ImportBundle\Message\FetchPageMessage;
-use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
