@@ -52,7 +52,7 @@ use function substr;
 use function trim;
 use Survos\DatasetBundle\Entity\DatasetInfo;
 use Survos\DatasetBundle\Entity\Provider;
-use Survos\DatasetBundle\Enum\Stage;
+use Survos\DataContracts\Path\Stage;
 use Survos\DataContracts\Vocabulary\ItemField;
 use Survos\DataContracts\Vocabulary\MuseumVocab;
 

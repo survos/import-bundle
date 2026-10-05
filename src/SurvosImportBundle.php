@@ -171,8 +171,8 @@ class SurvosImportBundle extends AbstractSurvosBundle
             ->setPublic(true)
             ->setAutoconfigured(true);
 
-        // Register adapter for data-bundle integration if data-bundle is available
-        if (class_exists(\Survos\DatasetBundle\Service\DataPaths::class)) {
+        // Register the dataset adapter only when the dataset bundle is available.
+        if (class_exists(\Survos\DatasetBundle\Service\DatasetPaths::class)) {
             $builder->autowire(\Survos\ImportBundle\Service\DataPathsFactoryAdapter::class)
                 ->setPublic(true)
                 ->setAutoconfigured(true);
