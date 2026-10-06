@@ -39,6 +39,11 @@ final class DtoMapper
         $dto = $rc->newInstanceWithoutConstructor();
 
         foreach ($rc->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
+            // A get-only hooked property (e.g. DcObj::$type, computed from genre/typeOfResource)
+            // has no backing value; assigning it throws "is read-only". It derives itself.
+            if ($prop->isVirtual()) {
+                continue;
+            }
             $value = $this->resolveValue($prop, $record, $context);
             $value = $this->coerceToPropertyType($prop, $value);
             if ($value !== null || $this->isNullable($prop)) {
@@ -102,7 +107,7 @@ final class DtoMapper
         foreach ($data as $k => $v) {
             if ($rc->hasProperty($k)) {
                 $p = $rc->getProperty($k);
-                if ($p->isPublic() && !$p->isReadOnly()) {
+                if ($p->isPublic() && !$p->isReadOnly() && !$p->isVirtual()) {
                     $p->setValue($dto, $v);
                 }
             }
