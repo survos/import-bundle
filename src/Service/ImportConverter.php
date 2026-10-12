@@ -1,31 +1,23 @@
 <?php
 declare(strict_types=1);
 
-namespace Survos\ImportBundle\Command;
+namespace Survos\ImportBundle\Service;
 
-use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\DependencyInjection\Attribute\Target;
-use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
 use Survos\ImportBundle\Event\ImportConvertStartedEvent;
-use Survos\ImportBundle\Service\CsvProfileExporter;
 use Survos\ImportBundle\Service\Provider\ProviderContext;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
-use Survos\ImportBundle\Service\RowNormalizer;
 use Survos\ImportBundle\IO\CsvWriter;
 use Survos\JsonlBundle\IO\JsonlReader;
 use Survos\JsonlBundle\IO\JsonlWriter;
-use Survos\JsonlBundle\Service\JsonlProfilerInterface;
 use Survos\JsonlBundle\Sqlite\SqlProfiler;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 
@@ -40,7 +32,6 @@ use function is_file;
 use function is_numeric;
 use function is_scalar;
 use function json_decode;
-use function ltrim;
 use function max;
 use function preg_match;
 use function realpath;
@@ -49,23 +40,16 @@ use function sprintf;
 use function str_starts_with;
 use function strlen;
 use function substr;
+use function is_dir;
+use function pathinfo;
+use function strtolower;
+use function preg_replace;
 use function trim;
-use Survos\DatasetBundle\Entity\DatasetInfo;
-use Survos\DatasetBundle\Entity\Provider;
-use Survos\DataContracts\Path\Stage;
 use Survos\DataContracts\Vocabulary\ItemField;
 use Survos\DataContracts\Vocabulary\MuseumVocab;
 
-/**
- * Conversion service AND the import:convert command.
- *
- * The #[AsCommand] is on convert() (method-level) rather than the class, so this is a
- * plain autowired service that other bundles (e.g. dataset-bundle's dataset:normalize /
- * dataset:assemble shortcuts) can inject and call convert() directly — passing the same
- * SymfonyStyle — while `import:convert` keeps working unchanged. This is the first step
- * toward imports being initiated from dataset-bundle (import soft-depends on dataset).
- */
-final class ImportConvertCommand
+/** File conversion with optional caller-owned event context. */
+final class ImportConverter
 {
     /** @var array<string,string> normalizedName => originalHeader */
     private array $fieldOriginalNames = [];
@@ -78,14 +62,8 @@ final class ImportConvertCommand
         private readonly RowProviderRegistry $rowProviders,
         private readonly RowNormalizer $rowNormalizer,
         private readonly CsvProfileExporter $csvExporter,
-        private readonly string $dataDir,
-        private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
         private readonly ?EventDispatcherInterface $dispatcher = null,
-        // Provider/DatasetInfo live on the dataset EM, not the default one.
-        #[Target('dataset.entity_manager')] private readonly ?EntityManagerInterface $entityManager = null,
         private readonly ?SqlProfiler $sqlProfiler = null,
-        private readonly ?UrlGeneratorInterface $urlGenerator = null,
-        private readonly int|string|bool|null $workCompression = false,
     ) {
     }
 
@@ -93,10 +71,10 @@ final class ImportConvertCommand
     public function convert(
         SymfonyStyle $io,
 
-        #[Argument('Input CSV/JSON/JSONL path (ZIP/GZ supported). Optional when --dataset is provided.')]
+        #[Argument('Input CSV/JSON/JSONL path (ZIP/GZ supported). Required; never inferred from context.')]
         ?string $input = null,
 
-        #[Option('Override output JSONL path (defaults to <dataDir>/<base>.jsonl, or dataset-aware defaults when --dataset is provided)')]
+        #[Option('Output JSONL path (defaults to a sibling of the input; required with --dataset context)')]
         ?string $output = null,
 
         #[Option('Max records to process (for convert/profile)')]
@@ -114,17 +92,14 @@ final class ImportConvertCommand
         #[Option('Write the SQL profile sidecar (.db). OFF by default — pass --profile to generate field stats when designing maps; the slow pass is unneeded once maps are settled (zm re-profiles anyway)', name: 'profile')]
         bool $profile = false,
 
-        #[Option('Dataset code (e.g. "wam", "marvel")')]
+        #[Option('Opaque dataset key for event listeners only; never used to resolve paths')]
         ?string $dataset = null,
 
-        #[Option('Dataset stage to write/read canonically: raw or normalize', name: 'stage')]
+        #[Option('Processing stage for row transforms and event listeners', name: 'stage')]
         string $stage = 'normalize',
 
-        #[Option('Convert only this core stem (default: every core in _raw)', name: 'core')]
+        #[Option('Core label for conversion progress; never used to resolve paths', name: 'core')]
         ?string $core = null,
-
-        #[Option('Convert every raw core for the dataset (default when --core is omitted)')]
-        bool $allCores = false,
 
         #[Option('Additional tags (comma-separated, e.g. "wikidata,youtube")', name: 'tags')]
         ?string $tagsOption = null,
@@ -140,16 +115,13 @@ final class ImportConvertCommand
         )]
         ?string $applyProfile = null,
 
-        #[Option('Convert all datasets for a provider (e.g. "mus")')]
-        ?string $provider = null,
-
         #[Option('Output in CSV format instead of JSONL')]
         bool $csv = false,
 
         #[Option('Dump raw and normalized row N and stop. Use --dump or --dump=1 for the first row.', name: 'dump')]
         bool|int $dump = false,
 
-        #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`/`claims:export`). dataset:enrich supplies it automatically.')]
+        #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`/`claims:export`). The caller must supply its path.')]
         ?string $claimsFile = null,
     ): int {
         $io->title('Import / Convert');
@@ -166,54 +138,6 @@ final class ImportConvertCommand
         }
         $this->currentStage = $stage;
 
-        // Default to discovering every core in _raw; --core restricts to one (the exception).
-        $allCores = $allCores || $core === null || trim((string) $core) === '';
-        $core = $allCores ? 'obj' : trim((string) $core); // 'obj' is a placeholder when discovering
-
-        // Resolve dataset list: --provider populates from DB, --dataset is a single entry
-        $datasetKeys = [];
-        if ($provider !== null && $provider !== '') {
-            if ($this->entityManager === null) {
-                $io->error('--provider requires dataset-bundle.');
-                return Command::FAILURE;
-            }
-            $providerEntity = $this->entityManager->getRepository(Provider::class)->find($provider);
-            if ($providerEntity === null) {
-                $io->error(sprintf('Provider "%s" not found. Run dataset:scan first.', $provider));
-                return Command::FAILURE;
-            }
-            $datasetKeys = array_map(static fn(DatasetInfo $d): string => $d->datasetKey, $providerEntity->getDatasets()->toArray());
-        } elseif ($dataset !== null && $dataset !== '' && $input === null) {
-            $datasetKeys = [$dataset];
-        }
-
-        // Multiple datasets: iterate and recurse
-        if (count($datasetKeys) > 1) {
-            $failed = 0;
-            foreach ($datasetKeys as $key) {
-                $io->section($key);
-                $result = $this->convert(
-                    $io,
-                    dataset: $key,
-                    limit: $limit,
-                    stage: $stage,
-                    core: $core,
-                    allCores: $allCores,
-                    legacyProfile: $legacyProfile,
-                    csv: $csv,
-                );
-                if ($result !== Command::SUCCESS) {
-                    $failed++;
-                }
-            }
-            return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
-        }
-
-        // Single dataset from list
-        if (count($datasetKeys) === 1) {
-            $dataset = $datasetKeys[0];
-        }
-
         $this->fieldOriginalNames = [];
         $this->extraTags          = $this->parseExtraTags($tagsOption);
         $dumpRecord = $this->normalizeDumpRecord($dump, $io);
@@ -221,77 +145,12 @@ final class ImportConvertCommand
             return Command::FAILURE;
         }
 
-        // Dataset-only invocation:
-        //   bin/console import:convert --dataset=fortepan
-        // Resolve canonical input/output/profile paths via DatasetPathsFactory (if registered).
-        $paths = null;
-        if (($input === null || $input === '') && ($dataset !== null && $dataset !== '')) {
-            if ($this->pathsFactory === null) {
-                $io->error(\sprintf(
-                    'Missing <input>. You passed --dataset=%s, but no DatasetPathsFactoryInterface is registered. ' .
-                    'Enable survos/data-bundle (or provide your own factory), or pass an explicit input path.',
-                    $dataset
-                ));
-                return Command::FAILURE;
-            }
-
-            $paths = $this->pathsFactory->for($dataset);
-
-            if ($allCores) {
-                if ($output !== null && $output !== '') {
-                    $io->error('--all-cores cannot be combined with --output. Each core writes to its canonical output path.');
-                    return Command::FAILURE;
-                }
-                if ($profileOnly) {
-                    $io->error('--all-cores cannot be combined with --profile-only. Profile one core at a time.');
-                    return Command::FAILURE;
-                }
-
-                $cores = $this->discoverCores($paths, $stage);
-                if ($cores === []) {
-                    $io->error(sprintf(
-                        'No %s core JSONL files found in %s.',
-                        self::inputStage($stage),
-                        self::inputStage($stage) === 'raw' ? $paths->rawDir : $paths->normalizedDir,
-                    ));
-                    return Command::FAILURE;
-                }
-
-                $failed = 0;
-                foreach ($cores as $rawCore) {
-                    $io->section(sprintf('%s / %s', $dataset, $rawCore));
-                    // Method-level #[AsCommand] lives on convert(); $this is not invokable.
-                    $result = $this->convert(
-                        $io,
-                        limit: $limit,
-                        legacyProfile: $legacyProfile,
-                        dataset: $dataset,
-                        stage: $stage,
-                        core: $rawCore,
-                        tagsOption: $tagsOption,
-                        zipPath: $zipPath,
-                        rootKey: $rootKey,
-                        applyProfile: $applyProfile,
-                        csv: $csv,
-                        dump: $dump
-                    );
-                    if ($result !== Command::SUCCESS) {
-                        $failed++;
-                    }
-                }
-
-                return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
-            }
-
-            $inputStage = $profileOnly ? $stage : self::inputStage($stage);
-            $input = $this->canonicalStagePath($paths, $inputStage, $core);
-
-            // Prefer canonical stage output unless caller provided --output
-            $output ??= $this->canonicalOutputPath($paths, $stage, $core);
-        }
-
         if ($input === null || $input === '') {
-            $io->error('Missing input. Provide <input> or pass --dataset to infer the canonical raw input path.');
+            $io->error('Missing input. Pass an explicit input path; dataset/provider path inference is not supported.');
+            return Command::FAILURE;
+        }
+        if ($dataset !== null && $dataset !== '' && ($output === null || $output === '')) {
+            $io->error('Pass an explicit output path when providing dataset event context.');
             return Command::FAILURE;
         }
 
@@ -301,47 +160,15 @@ final class ImportConvertCommand
             return Command::FAILURE;
         }
 
-        // A "real" dataset is one the caller named (--dataset/--provider) or one we can
-        // infer because the input lives under APP_DATA_DIR. Only real datasets route their
-        // output/profile to canonical APP_DATA_DIR paths and update the dataset registry.
-        // A bare file elsewhere must NOT be relocated under APP_DATA_DIR (see #obj/obj bug).
-        $datasetExplicit = $dataset !== null && $dataset !== '';
-        $datasetInferredFromPath = false;
-        if (!$datasetExplicit && $input !== null) {
-            $guessed = $this->inferDatasetFromInput($input);
-            if ($guessed !== null) {
-                $dataset = $guessed;
-                $datasetInferredFromPath = true;
-            }
-        }
-        $realDataset = $datasetExplicit || $datasetInferredFromPath;
-
-        // Determine dataset + source
-        if (\is_dir($input)) {
-            $dataset ??= \basename($input);
+        if (is_dir($input)) {
             $sourceInput = $input;
-            $sourceExt   = 'json_dir';
+            $sourceExt = 'json_dir';
         } else {
-            $ext      = \strtolower(\pathinfo($input, \PATHINFO_EXTENSION));
-            $baseName = \pathinfo($input, \PATHINFO_FILENAME);
-
-            $dataset ??= \preg_replace('/\.(jsonl?|csv)$/i', '', $baseName);
+            $ext = strtolower(pathinfo($input, PATHINFO_EXTENSION));
             [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
         }
 
-        // If this is a real dataset and a factory exists, prefer canonical output/profile
-        // defaults — but only when the caller has NOT provided an explicit --output, so we
-        // don't route a simple file conversion to APP_DATA_DIR. A bare file with no --dataset
-        // stays next to its source (see sourceAdjacentJsonlPath).
-        if ($paths === null && $output === null && $realDataset && $dataset !== '' && $this->pathsFactory !== null) {
-            $paths = $this->pathsFactory->for($dataset);
-        }
-
-        $outputPath = $output ?? match (true) {
-            $paths !== null => $this->canonicalOutputPath($paths, $stage, $core),
-            $realDataset    => $this->defaultJsonlPath((string) $dataset),
-            default         => $this->sourceAdjacentJsonlPath((string) $input),
-        };
+        $outputPath = $output ?? $this->sourceAdjacentJsonlPath($input);
 
         // Adjust output extension for CSV mode
         if ($csv) {
@@ -352,12 +179,14 @@ final class ImportConvertCommand
         // resetOutput() would unlink the input before we read it.
         if (!$profileOnly && \is_file($outputPath) && \is_file($sourceInput)
             && \realpath($outputPath) === \realpath($sourceInput)) {
-            $outputPath = \preg_replace('/\.(jsonl|csv)$/i', '.converted.$1', $outputPath, 1);
+            if ($output !== null) {
+                $io->error('Input and output must be different files.');
+                return Command::FAILURE;
+            }
+            $outputPath = preg_replace('/\.(jsonl|csv)(\.gz)?$/i', '.converted.$1$2', $outputPath, 1);
         }
 
-        $profilePath = $paths
-            ? $this->canonicalProfilePath($paths, $stage, $core)
-            : $this->defaultProfilePath($outputPath);
+        $profilePath = $this->defaultProfilePath($outputPath);
 
         // Resolve --apply-profile:
         //  - not provided => no transforms
@@ -383,12 +212,9 @@ final class ImportConvertCommand
         $baseTags[] = 'source:' . \basename($input);
         $baseTags   = \array_values(\array_unique(\array_merge($baseTags, $this->extraTags)));
 
-        // Only a real dataset is reported to the registry / gets a browse link; a bare
-        // file conversion passes '' so the registry listener skips it.
-        $registryDataset = $realDataset ? (string) $dataset : '';
+        // Context is supplied by the caller, never inferred from a filename or directory.
+        $registryDataset = $dataset ?? '';
 
-        // Dataset-lifecycle events are only meaningful for a real dataset; a bare file
-        // conversion skips them (listeners build DataPaths from the dataset key).
         if ($this->dispatcher && $registryDataset !== '') {
             $this->dispatcher->dispatch(
                 new ImportConvertStartedEvent(
@@ -616,42 +442,7 @@ final class ImportConvertCommand
             );
         }
 
-        // Hand the user a link to browse the dataset they just loaded.
-        if ($registryDataset !== '') {
-            $browseUrl = $this->browseUrl($registryDataset);
-            if ($browseUrl !== null) {
-                $io->writeln('');
-                $io->writeln(\sprintf('  Browse: <href=%s>%s</>', $browseUrl, $browseUrl));
-            }
-        }
-
         return Command::SUCCESS;
-    }
-
-    /**
-     * Build an absolute URL to browse a dataset (provider/code) in the UI, or null when
-     * no router is wired or the route is unavailable (import-bundle is UI-agnostic).
-     */
-    private function browseUrl(string $datasetKey): ?string
-    {
-        if ($this->urlGenerator === null) {
-            return null;
-        }
-
-        [$provider, $code] = \array_pad(\explode('/', $datasetKey, 2), 2, null);
-        if ($provider === null || $code === null || $code === '') {
-            return null;
-        }
-
-        try {
-            return $this->urlGenerator->generate(
-                'data_bundle_dataset_show',
-                ['provider' => $provider, 'code' => $code],
-                UrlGeneratorInterface::ABSOLUTE_URL
-            );
-        } catch (\Throwable) {
-            return null;
-        }
     }
 
     private function startConvertProgress(SymfonyStyle $io, ?int $estimatedRows): void
@@ -1027,12 +818,6 @@ final class ImportConvertCommand
         return Command::SUCCESS;
     }
 
-    /** Returns the canonical input stage for a given output stage (for conversion, not profiling). */
-    public static function inputStage(string $stage): string
-    {
-        return in_array($stage, ['ai', 'enrich'], true) ? 'normalize' : 'raw';
-    }
-
     /**
      * @return list<string>
      */
@@ -1061,241 +846,7 @@ final class ImportConvertCommand
 
 
     /**
-     * Row-bearing streams that normalize writes which are not folio Cores.
-     *
-     * `page` never appears in a /folio/{…}/{coreCode}/ URL, so it is deliberately absent from
-     * Core — but it *is* a stream of rows that enrich listeners must be shown, because that is
-     * where imagery lives (mediary's width/height and the archived S3 copy land on the page, not
-     * on the object row). term/termSet/link/linkType are deliberately NOT here: folio:build reads
-     * those straight out of norm/, so enriching them would write _folio files nothing ever opens.
-     */
-    private const NON_CORE_ROW_STREAMS = ['page'];
-
-    /**
-     * Cores to convert when --all-cores is in play, discovered from the stage this run READS.
-     *
-     * raw→normalize discovers in _raw; normalize→ai/enrich discovers in norm/. Getting this wrong
-     * is not a no-op: enrich used to discover in _raw, which only ever holds what the provider
-     * downloaded, so `page` — a stream normalize *manufactures* — could never be found and the
-     * enrich stage silently ran over the object core alone. Every folio in the fleet ended up with
-     * pages that had a mediaId, a NULL width and an upstream url, and it looked like a sync
-     * failure rather than a core that was never presented.
-     *
-     * @return list<string>
-     */
-    private function discoverCores(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage): array
-    {
-        return self::inputStage($stage) === 'raw'
-            ? $this->discoverRawCores($paths)
-            : $this->discoverNormalizedCores($paths);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function discoverRawCores(\Survos\ImportBundle\Model\DatasetPaths $paths): array
-    {
-        $rawDir = rtrim($paths->rawDir, '/');
-
-        // Only filenames whose stem is a known core (obj, doc, image, per, place, …)
-        // count as cores — this excludes provider download shards like rg_54-12.jsonl.
-        $result = $this->coresInDir($rawDir, self::knownCores());
-
-        // Un-cored raw: a provider may write a single raw file named after the dataset itself
-        // (e.g. NARA's rg_101.jsonl) to mean "this isn't a known core". Now that every image is a
-        // Page (no separate image core), the obj/doc distinction barely matters, so the un-cored
-        // file defaults to the `doc` core (canonicalRawInputPath resolves the input file).
-        if ($result === []) {
-            $code = basename(\dirname($rawDir));
-            if ($code !== '' && (is_file("$rawDir/$code.jsonl") || is_file("$rawDir/$code.jsonl.gz"))) {
-                return ['doc'];
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function discoverNormalizedCores(\Survos\ImportBundle\Model\DatasetPaths $paths): array
-    {
-        // No un-cored fallback here, unlike raw: normalize always writes canonical stem names, so
-        // a file it didn't name after a core isn't one (tr.<locale>.jsonl, for instance).
-        return $this->coresInDir(
-            rtrim($paths->normalizedDir, '/'),
-            [...self::knownCores(), ...self::NON_CORE_ROW_STREAMS],
-        );
-    }
-
-    /**
-     * @param list<string> $known
-     * @return list<string>
-     */
-    private function coresInDir(string $dir, array $known): array
-    {
-        if (!is_dir($dir)) {
-            return [];
-        }
-
-        $cores = [];
-        foreach (new \DirectoryIterator($dir) as $file) {
-            if (!$file->isFile()) {
-                continue;
-            }
-
-            $name = $file->getFilename();
-            if (preg_match('/^([A-Za-z0-9_-]+)\.jsonl(?:\.gz)?$/', $name, $matches) !== 1) {
-                continue;
-            }
-            if (!in_array($matches[1], $known, true)) {
-                continue;
-            }
-
-            $cores[$matches[1]] = true;
-        }
-
-        $result = array_keys($cores);
-
-        usort($result, static function (string $left, string $right): int {
-            if ($left === 'obj') {
-                return $right === 'obj' ? 0 : -1;
-            }
-            if ($right === 'obj') {
-                return 1;
-            }
-
-            return $left <=> $right;
-        });
-
-        return array_values($result);
-    }
-
-    /** @return list<string> */
-    private static function knownCores(): array
-    {
-        return array_values(array_filter(
-            (new \ReflectionClass(\Survos\DataContracts\Vocabulary\Core::class))->getConstants(),
-            'is_string',
-        ));
-    }
-
-    private function inferDatasetFromInput(string $input): ?string
-    {
-        $dataRoot = rtrim($this->dataDir, '/');
-        $inputReal = realpath($input) ?: $input;
-
-        if (!str_starts_with($inputReal, $dataRoot . '/')) {
-            return null;
-        }
-
-        $relative = substr($inputReal, strlen($dataRoot) + 1);
-        $parts = array_values(array_filter(explode('/', ltrim($relative, '/')), static fn(string $p) => $p !== ''));
-        if ($parts === []) {
-            return null;
-        }
-
-        foreach ($parts as $i => $part) {
-            if ($part === 'data' && isset($parts[$i + 1]) && $parts[$i + 1] !== '') {
-                return $parts[$i + 1];
-            }
-        }
-
-        foreach ($parts as $i => $part) {
-            if (preg_match('/^\d{2}_[a-z0-9_]+$/i', $part) !== 1) {
-                continue;
-            }
-            if ($i > 0 && $parts[$i - 1] !== '') {
-                return $parts[$i - 1];
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Where a dataset stage is written: canonicalStagePath() with the work_compression suffix, so
-     * normalize/enrich/ai output is gzipped from the start and nothing has to compress it later.
-     * Raw is never rewritten here. Inputs keep canonicalStagePath(); readers find the .gz twin.
-     */
-    private function canonicalOutputPath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
-    {
-        $path = $this->canonicalStagePath($paths, $stage, $core);
-
-        return $stage === 'raw' ? $path : \Survos\JsonlBundle\Util\Jsonl::outputPath($path, \Survos\JsonlBundle\Util\Jsonl::compression($this->workCompression));
-    }
-
-    private function canonicalStagePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
-    {
-        return match ($stage) {
-            'raw'   => $this->canonicalRawInputPath($paths, $core),
-            // TODO(bundle-refactor): ai claims belong in the vault (DataPaths::aiDir), not work.
-            'ai'     => rtrim($paths->datasetRoot, '/') . '/ai/' . $core . '.jsonl',
-            'enrich' => rtrim($paths->datasetRoot, '/') . '/' . Stage::Enrich->dir() . '/' . $core . '.jsonl',
-            default => rtrim($paths->normalizedDir, '/') . '/' . $core . '.jsonl',
-        };
-    }
-
-    private function canonicalRawInputPath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $core): string
-    {
-        if ($core === 'obj') {
-            if (is_file($paths->rawObjectPath)) {
-                return $paths->rawObjectPath;
-            }
-
-            if (!str_ends_with($paths->rawObjectPath, '.gz') && is_file($paths->rawObjectPath . '.gz')) {
-                return $paths->rawObjectPath . '.gz';
-            }
-        }
-
-        $base = rtrim($paths->rawDir, '/') . '/' . $core . '.jsonl';
-        if (is_file($base)) {
-            return $base;
-        }
-
-        $gz = $base . '.gz';
-        if (is_file($gz)) {
-            return $gz;
-        }
-
-        // Un-cored raw named after the dataset itself (e.g. NARA rg_101.jsonl) — the input for the
-        // default core when no core-named file exists.
-        $code = basename(\dirname(rtrim($paths->rawDir, '/')));
-        if ($code !== '' && $code !== $core) {
-            $named = rtrim($paths->rawDir, '/') . '/' . $code . '.jsonl';
-            if (is_file($named)) {
-                return $named;
-            }
-            if (is_file($named . '.gz')) {
-                return $named . '.gz';
-            }
-        }
-
-        return $base;
-    }
-
-    private function canonicalProfilePath(\Survos\ImportBundle\Model\DatasetPaths $paths, string $stage, string $core): string
-    {
-        $basePath = $this->canonicalStagePath($paths, $stage, $core);
-        $dir = ($stage === 'raw') ? $paths->rawDir : ($paths->profileDir ?? dirname($basePath));
-        $base = basename($basePath);
-        $base = preg_replace('/\.jsonl$/i', '', $base, 1);
-
-        return sprintf('%s/%s.profile.json', $dir, $base);
-    }
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
-
-    private function defaultJsonlPath(string $baseName): string
-    {
-        $dir = \rtrim($this->dataDir, '/');
-        return \sprintf('%s/%s.jsonl', $dir, $baseName);
-    }
-
-    /**
-     * Output path for a bare file conversion (no --dataset, no --output): a .jsonl sibling
+     * Output path for a bare file conversion (no --output): a .jsonl sibling
      * of the source, so we never relocate the user's file under APP_DATA_DIR.
      */
     private function sourceAdjacentJsonlPath(string $input): string
@@ -1603,7 +1154,7 @@ final class ImportConvertCommand
             $input,
             $format,
             $index,
-            $dataset,
+            $dataset ?? '',
             $tags,
             ImportConvertRowEvent::STATUS_OKAY,
             stage: $this->currentStage ?? 'normalize',

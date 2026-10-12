@@ -34,8 +34,11 @@ class ImportFilesystemCommandTest extends TestCase
         
         $parameters = $invokeMethod->getParameters();
         
-        // Should have 5 parameters: $io, $directory, $output, $extensions, $excludeDirs
-        self::assertCount(5, $parameters);
+        // Check the stable positional prefix; optional scan options may follow.
+        self::assertSame(['io', 'directory', 'output', 'extensions'], array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            array_slice($parameters, 0, 4),
+        ));
         
         // Check first parameter has no attribute (SymfonyStyle)
         self::assertCount(0, $parameters[0]->getAttributes());

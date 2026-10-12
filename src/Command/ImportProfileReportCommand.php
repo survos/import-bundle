@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
-use Survos\ImportBundle\Contract\DatasetContextInterface;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
@@ -22,13 +21,11 @@ use function is_array;
 use function is_file;
 use function is_float;
 use function is_numeric;
-use function is_string;
 use function json_decode;
 use function json_encode;
 use function preg_match;
 use function preg_replace;
 use function restore_error_handler;
-use function rtrim;
 use function set_error_handler;
 use function sprintf;
 use function str_ends_with;
@@ -43,19 +40,10 @@ use function usort;
 )]
 final class ImportProfileReportCommand
 {
-    public function __construct(
-        private readonly string $dataDir,
-        private readonly ?\Survos\ImportBundle\Contract\DatasetPathsFactoryInterface $pathsFactory = null,
-        private readonly ?DatasetContextInterface $datasetContext = null,
-    ) {
-    }
-
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Profile JSON path (defaults to <dataDir>/<dataset>.profile.json)')]
-        ?string $profile = null,
-        #[Option('Dataset code to infer the profile path if not provided')]
-        ?string $dataset = null,
+        #[Argument('Profile JSON path')]
+        string $profile,
         #[Option('Only show: split|nl|image|url|json|pk')]
         ?string $only = null,
         #[Option('Sort by: name|distinct|nulls|avgLen|maxLen')]
@@ -69,7 +57,7 @@ final class ImportProfileReportCommand
     ): int {
         $io->title('Profile Report');
 
-        $profilePath = $this->resolveProfilePath($profile, $dataset);
+        $profilePath = $profile;
 
         if ($profilePath === null || !is_file($profilePath)) {
             $io->error(sprintf('Profile file not found: %s', $profilePath ?? '(null)'));
@@ -166,29 +154,6 @@ final class ImportProfileReportCommand
         $io->note('Tip: --only=split|nl|image|url|json and --match="/regex/" and --sort=distinct|avgLen');
 
         return Command::SUCCESS;
-    }
-
-    private function resolveProfilePath(?string $profile, ?string $dataset): ?string
-    {
-        if (is_string($profile) && $profile !== '') {
-            return $profile;
-        }
-
-        if (($dataset === null || $dataset === '') && $this->datasetContext !== null && $this->datasetContext->has()) {
-            $dataset = $this->datasetContext->get();
-        }
-
-        if (is_string($dataset) && $dataset !== '') {
-            if ($this->pathsFactory !== null) {
-                $paths = $this->pathsFactory->for($dataset);
-                return $paths->profileObjectPath();
-            }
-
-            $dir = rtrim($this->dataDir, '/');
-            return sprintf('%s/%s.profile.json', $dir, $dataset);
-        }
-
-        return null;
     }
 
     private function safePregMatch(string $pattern, string $subject): int

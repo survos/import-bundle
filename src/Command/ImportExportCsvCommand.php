@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
-use Survos\ImportBundle\Contract\DatasetContextInterface;
-use Survos\ImportBundle\Contract\DatasetPathsFactoryInterface;
 use Survos\ImportBundle\Service\CsvProfileExporter;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -17,7 +15,6 @@ use function basename;
 use function dirname;
 use function is_string;
 use function preg_replace;
-use function rtrim;
 use function sprintf;
 use function str_ends_with;
 use function substr;
@@ -26,21 +23,16 @@ use function substr;
 final class ImportExportCsvCommand
 {
     public function __construct(
-        private readonly string $dataDir,
         private readonly CsvProfileExporter $exporter,
-        private readonly ?DatasetPathsFactoryInterface $pathsFactory = null,
-        private readonly ?DatasetContextInterface $datasetContext = null,
     ) {
     }
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Input JSONL path (optional if --profile or --dataset is provided)')]
+        #[Argument('Input JSONL path (optional if --profile is provided)')]
         ?string $input = null,
-        #[Option('Profile JSON path (optional if --dataset or input can infer it)')]
+        #[Option('Profile JSON path (optional if input can infer it)')]
         ?string $profile = null,
-        #[Option('Dataset code to infer profile/input paths')]
-        ?string $dataset = null,
         #[Option('Override output CSV path')]
         ?string $output = null,
         #[Option('Max records to export (0 = no limit)')]
@@ -50,9 +42,9 @@ final class ImportExportCsvCommand
 
         $limit = ($limit !== null && $limit <= 0) ? null : $limit;
 
-        $profilePath = $this->resolveProfilePath($profile, $dataset, $input);
+        $profilePath = $this->resolveProfilePath($profile, $input);
         if ($profilePath === null || $profilePath === '') {
-            $io->error('Missing profile. Provide --profile, --dataset, or an input path to infer it.');
+            $io->error('Missing profile. Provide --profile or an input path to infer it.');
             return Command::FAILURE;
         }
 
@@ -77,24 +69,10 @@ final class ImportExportCsvCommand
         return Command::SUCCESS;
     }
 
-    private function resolveProfilePath(?string $profile, ?string $dataset, ?string $input): ?string
+    private function resolveProfilePath(?string $profile, ?string $input): ?string
     {
         if (is_string($profile) && $profile !== '') {
             return $profile;
-        }
-
-        if (($dataset === null || $dataset === '') && $this->datasetContext !== null && $this->datasetContext->has()) {
-            $dataset = $this->datasetContext->getOrNull();
-        }
-
-        if (is_string($dataset) && $dataset !== '') {
-            if ($this->pathsFactory !== null) {
-                $paths = $this->pathsFactory->for($dataset);
-                return $paths->profileObjectPath();
-            }
-
-            $dir = rtrim($this->dataDir, '/');
-            return sprintf('%s/%s.profile.json', $dir, $dataset);
         }
 
         if (is_string($input) && $input !== '') {

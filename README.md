@@ -23,12 +23,33 @@ You can also use it in a simpler “direct CSV → Entity → Import” mode for
 
 ### Conversion is a callable service
 
-`ImportConvertCommand` carries `#[AsCommand('import:convert')]` on its `convert()` **method**
-(not the class), so it is a plain autowired service in addition to being the command. Other
-bundles inject it and call `convert($io, dataset: …, stage: …)` directly, passing the same
-`SymfonyStyle`. dataset-bundle's `dataset:normalize` / `dataset:assemble` shortcuts use this to
-initiate imports from the dataset side. (Planned: extract a dedicated `ConvertService` and make
-import-bundle a soft dependency on dataset-bundle.)
+`Survos\ImportBundle\Service\ImportConverter` is an injectable service. Its `convert()`
+method carries `#[AsCommand('import:convert', ...)]`, so the same implementation is available
+from the CLI and from application workflows:
+
+```php
+$result = $converter->convert(
+    $io,
+    input: $rawPath,
+    output: $normalizedPath,
+    dataset: $datasetKey, // optional opaque context for existing event listeners
+    stage: 'normalize',
+);
+```
+
+Import does not query providers, discover dataset cores, resolve pipeline directories or depend
+on dataset-bundle. Callers resolve paths (for example through DataPaths/DatasetPaths), enumerate
+cores, and pass a claims file explicitly for enrichment. With dataset event context, both input
+and output are required. A bare `import:convert input.csv` writes a sibling `input.jsonl`.
+
+Migration: inject `ImportConverter` instead of `ImportConvertCommand`. `--provider` and
+`--all-cores` are removed; `--dataset` is context only. `import:browse` takes a JSONL path,
+`import:profile:report` takes a profile path, and `import:export:csv` takes input/profile paths.
+`FetchRecordExporter::exportToJsonl()` also requires its output path. Compression belongs to the
+caller-selected output filename (`.jsonl` or `.jsonl.gz`); dataset stage callers now configure
+`survos_dataset.work_compression`, replacing `survos_import.work_compression`.
+
+The conversion row/start/finish events remain compatible with Harvest's existing listeners.
 
 ---
 
@@ -150,7 +171,7 @@ This powers `code:entity` to emit correct Doctrine field mappings (e.g. using `T
 **Usage:**
 
 ```bash
-bin/console import:convert data/movies.csv --dataset=movies
+bin/console import:convert data/movies.csv --output=data/movies.jsonl
 ```
 
 Features:
@@ -215,7 +236,7 @@ Key features:
 ### Step 1 — Convert CSV → JSONL + profile
 
 ```bash
-bin/console import:convert data/movies.csv --dataset=movies
+bin/console import:convert data/movies.csv --output=data/movies.jsonl
 ```
 
 Produces:

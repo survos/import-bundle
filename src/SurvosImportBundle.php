@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Survos\ImportBundle;
 
 use Survos\ImportBundle\Command\ImportBrowseCommand;
-use Survos\ImportBundle\Command\ImportConvertCommand;
+use Survos\ImportBundle\Service\ImportConverter;
 use Survos\ImportBundle\Command\ImportDirCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
 use Survos\ImportBundle\Command\ImportExportCsvCommand;
@@ -104,26 +104,19 @@ class SurvosImportBundle extends AbstractSurvosBundle
                 ->addTag('console.command');
             // @todo: inject each service properly
 
-        // Method-level #[AsCommand] on convert(); autoconfigure registers the command tag
-        // (no bare console.command tag — that assumed __invoke). Public + autowired so other
-        // bundles can inject it and call convert() directly.
-        // TODO(bundle-refactor): extract a ConvertService; the command becomes a thin caller.
-        $builder->autowire(ImportConvertCommand::class)
+        // The converter is both an injectable service and the import:convert command.
+        $builder->autowire(ImportConverter::class)
             ->setPublic(true)
-            ->setAutoconfigured(true)
-            ->setArgument('$dataDir', $config['dir'])
-            ->setArgument('$workCompression', $config['work_compression']);
+            ->setAutoconfigured(true);
 
         $builder->autowire(ImportProfileReportCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
-            ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
 
         $builder->autowire(ImportExportCsvCommand::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
-            ->setArgument('$dataDir', $config['dir'])
             ->addTag('console.command');
 
 
@@ -171,16 +164,6 @@ class SurvosImportBundle extends AbstractSurvosBundle
             ->setPublic(true)
             ->setAutoconfigured(true);
 
-        // Register the dataset adapter only when the dataset bundle is available.
-        if (class_exists(\Survos\DatasetBundle\Service\DatasetPaths::class)) {
-            $builder->autowire(\Survos\ImportBundle\Service\DataPathsFactoryAdapter::class)
-                ->setPublic(true)
-                ->setAutoconfigured(true);
-                
-            // Alias the adapter to the interface
-            $builder->setAlias(\Survos\ImportBundle\Contract\DatasetPathsFactoryInterface::class, \Survos\ImportBundle\Service\DataPathsFactoryAdapter::class);
-        }
-
         // @todo: inject each service properly
 
         $builder->autowire(LooseObjectMapper::class)
@@ -216,10 +199,6 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $definition->rootNode()
             ->children()
                 ->scalarNode('dir')->info('Default directory for data files')->defaultValue('data')->end()
-                ->scalarNode('work_compression')
-                    ->info('Dataset stage output (normalize, enrich, ai): false writes <core>.jsonl; 0-9 writes <core>.jsonl.gz at that gzip level')
-                    ->defaultFalse()
-                ->end()
                 ->arrayNode('dto_namespace_roots')
                     ->info('Namespace roots for convention-based DTO class resolution (e.g. App\\Dto)')
                     ->scalarPrototype()->end()

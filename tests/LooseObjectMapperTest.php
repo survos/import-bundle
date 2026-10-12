@@ -18,7 +18,7 @@ final class LooseObjectMapperTest extends TestCase
 {
     private function mapperWithStubbedTypes(array $map): LooseObjectMapper
     {
-        $em = $this->createMock(EntityManagerInterface::class);
+        $em = $this->createStub(EntityManagerInterface::class);
 
         $mapper = new LooseObjectMapper(
             entityManager: $em,
@@ -26,7 +26,7 @@ final class LooseObjectMapperTest extends TestCase
             nc: new CamelCaseToSnakeCaseNameConverter(),
         );
 
-        $extractor = $this->createMock(DoctrineExtractor::class);
+        $extractor = $this->createStub(DoctrineExtractor::class);
         $extractor->method('getType')->willReturnCallback(
             function (string $class, string $property) use ($map) {
                 return $map[$property] ?? null;
@@ -35,7 +35,6 @@ final class LooseObjectMapperTest extends TestCase
 
         $refl = new \ReflectionClass($mapper);
         $prop = $refl->getProperty('doctrineExtractor');
-        $prop->setAccessible(true);
         $prop->setValue($mapper, $extractor);
 
         return $mapper;

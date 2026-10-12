@@ -1,13 +1,11 @@
 <?php
 declare(strict_types=1);
 
-// Composer autoload
-require dirname(__DIR__) . '/vendor/autoload.php';
-
-// Define KERNEL constant for Symfony-friendly setups
-if (!defined('KERNEL')) {
-    define('KERNEL', 'App\Kernel');
+// Support both a standalone bundle install and the monorepo test environment.
+$autoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (!is_file($autoload)) {
+    $autoload = dirname(__DIR__, 3) . '/vendor/autoload.php';
 }
-
-// If you keep an App\Kernel around in this repo, it will be autoloadable.
-// Not strictly required for these unit tests.
+$loader = require $autoload;
+$loader->addPsr4('Survos\\ImportBundle\\', dirname(__DIR__) . '/src/');
+$loader->addPsr4('Survos\\ImportBundle\\Tests\\', __DIR__);

@@ -29,7 +29,7 @@ final class DtoMapRecordListener
     #[AsEventListener(event: ImportConvertRowEvent::class, priority: -100)]
     public function mapRecord(ImportConvertRowEvent $event): void
     {
-        if ($event->row === null || $event->dataset === null) {
+        if ($event->row === null || $event->dataset === '') {
             return;
         }
 
