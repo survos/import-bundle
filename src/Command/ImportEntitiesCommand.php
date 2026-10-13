@@ -4,26 +4,24 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
 
-use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\Mapping\MappingException;
-use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
-use Symfony\Component\PropertyAccess\PropertyAccess;
 use JsonMachine\Items;
 use League\Csv\Reader as CsvReader;
-use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Event\ImportEntitiesFinishedEvent;
 use Survos\ImportBundle\Event\ImportEntityMappedEvent;
 use Survos\ImportBundle\Event\ImportEntityPersistedEvent;
 use Survos\ImportBundle\Event\ImportEntityRowEvent;
-use Survos\JsonlBundle\IO\JsonlReader as SurvosJsonlReader;
+use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\LooseObjectMapper;
+use Survos\JsonlBundle\IO\JsonlReader as SurvosJsonlReader;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -67,31 +65,33 @@ final class ImportEntitiesCommand
         ?string $tenant = null,
     ): int {
         if (!$this->em) {
-            $io->error("composer req doctrine/orm");
+            $io->error('composer req doctrine/orm');
+
             return Command::FAILURE;
         }
         $validate ??= true;
 
-
         if (!$entityClass) {
-            $entityClass = $io->askQuestion(new ChoiceQuestion("Entity class?", $this->getAllEntityClasses()));
+            $entityClass = $io->askQuestion(new ChoiceQuestion('Entity class?', $this->getAllEntityClasses()));
         }
         if (!class_exists($entityClass)) {
-            $entityClass = 'App\\Entity\\' . $entityClass;
+            $entityClass = 'App\\Entity\\'.$entityClass;
         }
 
         $entityClass = $this->resolver->resolve($entityClass);
         if (!class_exists($entityClass)) {
             $io->error("Entity class not found: $entityClass");
+
             return Command::FAILURE;
         }
 
         if (!$file) {
-            $files = glob($this->dataDir . '/*');
-            $file = $io->askQuestion(new ChoiceQuestion("What file would you like to import", $files));
+            $files = glob($this->dataDir.'/*');
+            $file = $io->askQuestion(new ChoiceQuestion('What file would you like to import', $files));
         }
         if (!file_exists($file)) {
             $io->error("File not found: $file");
+
             return Command::FAILURE;
         }
 
@@ -100,10 +100,10 @@ final class ImportEntitiesCommand
             $pkField = $pk ?? $this->resolvePrimaryKey($entityClass);
             if (!$pkField) {
                 $io->warning('No obvious primary key found; proceeding without upsert (always insert).');
+
                 return Command::FAILURE;
-            } else {
-                $io->writeln("Using primary key: <info>$pkField</info>");
             }
+            $io->writeln("Using primary key: <info>$pkField</info>");
         }
 
         if ($reset) {
@@ -129,32 +129,31 @@ final class ImportEntitiesCommand
                 $pkValue = $idx;
             } elseif ($pkField) {
                 if ($rowKey = $this->mapper->resolveRowKey($row, $pkField)) {
-
                     $pkValue = $row[$pkField] ?? null;
 
                     $rp = new \ReflectionProperty($entityClass, $pkField);
                     $type = $rp->getType();
-                    if ($type instanceof \ReflectionNamedType && $type->getName() === 'string') {
-                        $pkValue = $pkValue !== null ? (string) $pkValue : null;
+                    if ($type instanceof \ReflectionNamedType && 'string' === $type->getName()) {
+                        $pkValue = null !== $pkValue ? (string) $pkValue : null;
                     }
 
-// then assign to the entity
+                    // then assign to the entity
 
-//                    dump($rowKey);
+                    //                    dump($rowKey);
                     if (empty($pkValue)) {
                         $io->warning("Skipping row $rowKey, no primary key found.");
-//                        dump($row);
+                        //                        dump($row);
                         continue;
                     }
                 } else {
                     $io->warning(sprintf('Row %d: pk field "%s" not found in row (keys: %s) — skipping.', $idx, $pkField, implode(', ', array_keys($row))));
                     continue;
                 }
-                assert($pkField, "No pk field found.");
-                assert($pkValue, "No pk value found for " . $pkField);
+                assert($pkField, 'No pk field found.');
+                assert($pkValue, 'No pk value found for '.$pkField);
             }
 
-//            if ($pkValue) {
+            //            if ($pkValue) {
             if (!$entity = $this->em->getRepository($entityClass)->findOneBy([$pkField => $pkValue])) {
                 $entity = new $entityClass();
                 if (!$idIsLineNumber) {
@@ -162,35 +161,35 @@ final class ImportEntitiesCommand
                 }
                 $this->em->persist($entity);
             }
-//            }
-//            dd($entity, $pkValue, $pkField);
-//
-//            if (!$entity) {
-//                $entity = new $entityClass();
-//                // if we have PK, set it directly (leave mapper to handle the rest)
-//                if ($pkField) {
-//                    if ($rowKey = $this->mapper->resolveRowKey($row, $pkField)) {
-//                            // direct set for public properties, but need to match type.
-//                        try {
-//                            $entity->$pkField = $row[$rowKey];
-//                        } catch (\Throwable) {
-//                            // ignore; LooseObjectMapper will handle during map()
-//                        }
-//                    }
-//                }
-//                if (!$this->propertyAccessor->getValue($entity, $pkField)) {
-//                    continue;
-//                }
-//                // if there's no PK, use $idx
-//                if (!$entity->$pkField) {
-//                    dump($row);
-//                    continue;
-//                }
-//                $this->em->persist($entity);
-//            }
+            //            }
+            //            dd($entity, $pkValue, $pkField);
+            //
+            //            if (!$entity) {
+            //                $entity = new $entityClass();
+            //                // if we have PK, set it directly (leave mapper to handle the rest)
+            //                if ($pkField) {
+            //                    if ($rowKey = $this->mapper->resolveRowKey($row, $pkField)) {
+            //                            // direct set for public properties, but need to match type.
+            //                        try {
+            //                            $entity->$pkField = $row[$rowKey];
+            //                        } catch (\Throwable) {
+            //                            // ignore; LooseObjectMapper will handle during map()
+            //                        }
+            //                    }
+            //                }
+            //                if (!$this->propertyAccessor->getValue($entity, $pkField)) {
+            //                    continue;
+            //                }
+            //                // if there's no PK, use $idx
+            //                if (!$entity->$pkField) {
+            //                    dump($row);
+            //                    continue;
+            //                }
+            //                $this->em->persist($entity);
+            //            }
 
             // Map remaining data into entity; ignore PK
-            $ignore = $pkField??false ? [$pkField] : [];
+            $ignore = $pkField ?? false ? [$pkField] : [];
             $this->mapper->mapInto($row, $entity, ignored: $ignore);
             if ($this->dispatcher) {
                 $mappedEvent = new ImportEntityMappedEvent($entity, $row, $entityClass, $dataset, $tenant, $file);
@@ -199,27 +198,27 @@ final class ImportEntitiesCommand
             }
             if ($validate) {
                 if (!$this->validator) {
-                    throw new \RuntimeException("Install symfony/validator");
+                    throw new \RuntimeException('Install symfony/validator');
+                }
+                $errors = $this->validator->validate($entity);
+                if (count($errors) > 0) {
+                    foreach ($errors as $error) {
+                        $io->warning(sprintf('Row %d [%s]: %s (value: "%s")',
+                            $i,
+                            $error->getPropertyPath(),
+                            $error->getMessage(),
+                            mb_substr((string) $error->getInvalidValue(), 0, 50)
+                        ));
                     }
-                    $errors = $this->validator->validate($entity);
-                    if (count($errors) > 0) {
-                        foreach ($errors as $error) {
-                            $io->warning(sprintf('Row %d [%s]: %s (value: "%s")',
-                                $i,
-                                $error->getPropertyPath(),
-                                $error->getMessage(),
-                                mb_substr((string) $error->getInvalidValue(), 0, 50)
-                            ));
-                        }
-                        continue; // or collect for summary
-                    }
+                    continue; // or collect for summary
+                }
             }
 
             if ($this->dispatcher) {
                 $this->dispatcher->dispatch(new ImportEntityPersistedEvent($entity, $row, $entityClass, $dataset, $tenant, $file));
             }
 
-            $i++;
+            ++$i;
             if ($batch > 0 && ($i % $batch) === 0) {
                 if ($progress) {
                     $io->writeln("... $i");
@@ -237,6 +236,7 @@ final class ImportEntitiesCommand
             $this->dispatcher->dispatch(new ImportEntitiesFinishedEvent($entityClass, $i, $dataset, $tenant, $file));
         }
         $io->success(sprintf("%d now in $entityClass", $this->em->getRepository($entityClass)->count()));
+
         return Command::SUCCESS;
     }
 
@@ -245,9 +245,9 @@ final class ImportEntitiesCommand
         /** @var ClassMetadata $m */
         $m = $this->em->getClassMetadata($entityClass);
         $ids = $m->getIdentifierFieldNames();
+
         return $ids[0] ?? null; // handle only single-field PKs here
     }
-
 
     private function resolvePrimaryKey(string $entityClass): ?string
     {
@@ -257,17 +257,18 @@ final class ImportEntitiesCommand
             return null;
         }
         $ids = $meta->getIdentifier();
-        if (\count($ids) === 1) {
+        if (1 === \count($ids)) {
             return $ids[0];
         }
 
         // heuristic if metadata has no single id yet (or not managed)
-        $candidates = ['id','code','sku','ssn','uid','uuid','key'];
+        $candidates = ['id', 'code', 'sku', 'ssn', 'uid', 'uuid', 'key'];
         foreach ($candidates as $c) {
             if ($meta->hasField($c) || $meta->hasField(strtolower($c))) {
                 return $c;
             }
         }
+
         return null;
     }
 
@@ -276,7 +277,7 @@ final class ImportEntitiesCommand
         $metadata = $this->em->getMetadataFactory()->getAllMetadata();
 
         return array_map(
-            fn($meta) => $meta->getName(),
+            fn ($meta) => $meta->getName(),
             $metadata
         );
     }
@@ -287,7 +288,7 @@ final class ImportEntitiesCommand
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         // CSV/TSV (delimiter sniff, quoted fields supported)
-        if (in_array($ext, ['csv','tsv','txt'], true)) {
+        if (in_array($ext, ['csv', 'tsv', 'txt'], true)) {
             if (!\class_exists(CsvReader::class)) {
                 throw new \RuntimeException('CSV import requires league/csv. Install it with: composer require league/csv');
             }
@@ -303,34 +304,37 @@ final class ImportEntitiesCommand
             foreach ($csv->getRecords() as $row) {
                 yield (array) $row;
             }
+
             return;
         }
 
         // JSON (stream first-level items)
-        if ($ext === 'json') {
+        if ('json' === $ext) {
             foreach (Items::fromFile($path) as $item) {
                 yield is_array($item) ? $item : (array) $item;
             }
+
             return;
         }
 
         // JSONL (prefer Survos reader; fallback to fgets)
-        if (in_array($ext, ['jsonl','ndjson'], true)) {
+        if (in_array($ext, ['jsonl', 'ndjson'], true)) {
             if (class_exists(SurvosJsonlReader::class)) {
                 $reader = new SurvosJsonlReader($path);
                 foreach ($reader as $row) {
                     yield (array) $row;
                 }
+
                 return;
             }
             $fh = fopen($path, 'r');
-            if ($fh === false) {
+            if (false === $fh) {
                 throw new \RuntimeException("Unable to open $path");
             }
             try {
                 while (($line = fgets($fh)) !== false) {
                     $line = trim($line);
-                    if ($line === '') {
+                    if ('' === $line) {
                         continue;
                     }
                     $row = json_decode($line, true);
@@ -341,6 +345,7 @@ final class ImportEntitiesCommand
             } finally {
                 fclose($fh);
             }
+
             return;
         }
 
@@ -349,7 +354,7 @@ final class ImportEntitiesCommand
 
     private function coerceValue(string $field, mixed $value): mixed
     {
-        if ($value === '' || $value === null) {
+        if ('' === $value || null === $value) {
             return null;
         }
         if (!is_string($value)) {
@@ -357,60 +362,64 @@ final class ImportEntitiesCommand
         }
 
         $v = trim($value);
-        if ($v == '') {
+        if ('' == $v) {
             return null;
         }
 
         // plural fields with comma or pipe => array
         $looksPlural = static function (string $name): bool {
             $n = strtolower($name);
-            if (\in_array($n, ['is','has','was','ids','status'], true)) {
+            if (\in_array($n, ['is', 'has', 'was', 'ids', 'status'], true)) {
                 return false;
             }
+
             return str_ends_with($n, 's');
         };
         if ($looksPlural($field) && (str_contains($v, ',') || str_contains($v, '|'))) {
             $parts = preg_split('/[|,]/', $v);
-            $parts = array_map(static fn(string $s) => trim($s), $parts);
-            return array_values(array_filter($parts, static fn($s) => $s !== ''));
+            $parts = array_map(static fn (string $s) => trim($s), $parts);
+
+            return array_values(array_filter($parts, static fn ($s) => '' !== $s));
         }
 
         // pipe-only convenience
         if (str_contains($v, '|')) {
-            $parts = array_map(static fn(string $s) => trim($s), explode('|', $v));
-            return array_values(array_filter($parts, static fn($s) => $s !== ''));
+            $parts = array_map(static fn (string $s) => trim($s), explode('|', $v));
+
+            return array_values(array_filter($parts, static fn ($s) => '' !== $s));
         }
 
         // booleans
         $l = strtolower($v);
-        if (in_array($l, ['true','false','yes','no','y','n','on','off','1','0'], true)) {
-//            return in_array($l, ['true','yes','y','on','1'], true);
-            return in_array($l, ['true','yes','y','on'], true);
+        if (in_array($l, ['true', 'false', 'yes', 'no', 'y', 'n', 'on', 'off', '1', '0'], true)) {
+            //            return in_array($l, ['true','yes','y','on','1'], true);
+            return in_array($l, ['true', 'yes', 'y', 'on'], true);
         }
 
         // ISO 8601 datetime
-        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $v) === 1) {
+        if (1 === preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $v)) {
             try {
-                return new DateTimeImmutable($v);
+                return new \DateTimeImmutable($v);
             } catch (\Throwable) {
             }
         }
 
         // integers (avoid zero-padded codes unless “numeric preferred”)
         $numericPreferred = [
-            'page','count','index','position','rank','duration','size',
-            'budget','revenue','popularity','score','rating','price','quantity','year','votes',
+            'page', 'count', 'index', 'position', 'rank', 'duration', 'size',
+            'budget', 'revenue', 'popularity', 'score', 'rating', 'price', 'quantity', 'year', 'votes',
         ];
         $preferNumeric = in_array(strtolower($field), $numericPreferred, true);
 
-        if (preg_match('/^-?\d+$/', $v) === 1) {
-            $hasLeadingZero = strlen($v) > 1 && $v[0] === '0';
-            return ($preferNumeric || !$hasLeadingZero) ? (int)$v : $v;
+        if (1 === preg_match('/^-?\d+$/', $v)) {
+            $hasLeadingZero = strlen($v) > 1 && '0' === $v[0];
+
+            return ($preferNumeric || !$hasLeadingZero) ? (int) $v : $v;
         }
 
         // floats (incl. scientific)
-        if (is_numeric($v) && preg_match('/^-?(?:\d+\.\d+|\d+\.|\.\d+|\d+)(?:[eE][+\-]?\d+)?$/', $v) === 1) {
-            return (float)$v;
+        if (is_numeric($v) && 1 === preg_match('/^-?(?:\d+\.\d+|\d+\.|\.\d+|\d+)(?:[eE][+\-]?\d+)?$/', $v)) {
+            return (float) $v;
         }
 
         return $v;

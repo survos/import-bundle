@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
@@ -12,7 +13,6 @@ use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter
 use Symfony\Component\String\UnicodeString;
 use Symfony\Component\TypeInfo\Type;
 use Symfony\Component\TypeInfo\TypeIdentifier;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * Best-effort array/stdClass → object mapper (Symfony 7.3 / PHP 8.4).
@@ -49,12 +49,12 @@ final class LooseObjectMapper
     /**
      * Map payload into a NEW instance of $class.
      *
-     * @param array|object $data
      * @param class-string $class
      */
     public function map(array|object $data, string $class, array $context = []): object
     {
         $object = new $class();
+
         return $this->mapInto($data, $object, ignored: $context['ignored'] ?? ['id'], context: $context);
     }
 
@@ -65,22 +65,22 @@ final class LooseObjectMapper
      */
     public function mapInto(array|object $data, object $object, array $ignored = ['id'], array $context = []): object
     {
-        $debug = (bool)($context['debug'] ?? false);
+        $debug = (bool) ($context['debug'] ?? false);
 
         $this->debug('mapInto() start', $debug, [
             'object_class' => $object::class,
-            'ignored'      => $ignored,
-            'raw_keys'     => is_array($data) ? array_keys($data) : array_keys((array)$data),
+            'ignored' => $ignored,
+            'raw_keys' => is_array($data) ? array_keys($data) : array_keys((array) $data),
         ]);
 
         $arr = is_object($data) ? (array) $data : $data;
         $arr = $this->normalizeKeysToSnake($arr, $debug);
 
-        $coerceScalars   = $context['coerce_scalars'] ?? true;
-        $coerceDates     = $context['coerce_dates'] ?? true;
-        $perDelim        = $context['list_delimiters'] ?? [];
-        $nullLiterals    = array_map('strtolower', $context['null_literals'] ?? ['null','n/a','na','nil','none','']);
-        $wrapScalarArray = (bool)($context['wrap_scalar_to_array'] ?? false);
+        $coerceScalars = $context['coerce_scalars'] ?? true;
+        $coerceDates = $context['coerce_dates'] ?? true;
+        $perDelim = $context['list_delimiters'] ?? [];
+        $nullLiterals = array_map('strtolower', $context['null_literals'] ?? ['null', 'n/a', 'na', 'nil', 'none', '']);
+        $wrapScalarArray = (bool) ($context['wrap_scalar_to_array'] ?? false);
 
         foreach ($arr as $snakeKey => $value) {
             $prop = $this->nc->denormalize((string) $snakeKey);
@@ -98,9 +98,9 @@ final class LooseObjectMapper
 
             $writable = $this->pa->isWritable($object, $prop);
             $this->debug('Writable check', $debug, [
-                'prop'      => $prop,
-                'writable'  => $writable,
-                'class'     => $object::class,
+                'prop' => $prop,
+                'writable' => $writable,
+                'class' => $object::class,
             ]);
 
             // Try alternative acronym property if not writable (Id → ID, Url → URL, etc.)
@@ -108,18 +108,18 @@ final class LooseObjectMapper
                 $altProp = $this->resolveAcronymProperty($object, $prop, $debug)
                     ?? $this->resolveByCanonical($object, $snakeKey, $debug);
 
-                if ($altProp === null) {
+                if (null === $altProp) {
                     $this->debug('No writable property found, skipping field', $debug, [
                         'snake_key' => $snakeKey,
-                        'prop'      => $prop,
+                        'prop' => $prop,
                     ]);
                     continue;
                 }
 
                 $this->debug('Using altProp for field', $debug, [
                     'snake_key' => $snakeKey,
-                    'prop'      => $prop,
-                    'alt_prop'  => $altProp,
+                    'prop' => $prop,
+                    'alt_prop' => $altProp,
                 ]);
 
                 $prop = $altProp;
@@ -130,8 +130,8 @@ final class LooseObjectMapper
 
             if ($type instanceof Type) {
                 $this->debug('TypeInfo resolved', $debug, [
-                    'prop'      => $prop,
-                    'type'      => (string)$type,
+                    'prop' => $prop,
+                    'type' => (string) $type,
                     'value_raw' => $this->shortExport($value),
                 ]);
 
@@ -148,7 +148,7 @@ final class LooseObjectMapper
                 );
             } else {
                 $this->debug('No TypeInfo for property (non-Doctrine field?)', $debug, [
-                    'prop'      => $prop,
+                    'prop' => $prop,
                     'value_raw' => $this->shortExport($value),
                 ]);
             }
@@ -156,14 +156,14 @@ final class LooseObjectMapper
             try {
                 $this->pa->setValue($object, $prop, $value);
                 $this->debug('setValue() OK', $debug, [
-                    'prop'      => $prop,
+                    'prop' => $prop,
                     'value_set' => $this->shortExport($value),
                 ]);
             } catch (\Throwable $e) {
                 $this->debug('setValue() FAILED', $debug, [
-                    'prop'   => $prop,
-                    'error'  => $e->getMessage(),
-                    'class'  => $object::class,
+                    'prop' => $prop,
+                    'error' => $e->getMessage(),
+                    'class' => $object::class,
                 ]);
                 // best-effort: skip unassignable fields
             }
@@ -192,26 +192,28 @@ final class LooseObjectMapper
         bool $coerceDates,
         array $nullLiterals,
         bool $wrapScalarArray,
-        bool $debug
+        bool $debug,
     ): mixed {
         $this->debug('coerceValueForType() start', $debug, [
             'field' => $field,
-            'type'  => (string)$type,
+            'type' => (string) $type,
             'value_raw' => $this->shortExport($value),
         ]);
 
         // Normalize empties & common null-literals
-        if ($value === null) {
+        if (null === $value) {
             $this->debug('Value is already null', $debug, ['field' => $field]);
+
             return null;
         }
         if (is_string($value)) {
             $trim = trim($value);
-            if ($trim === '' || in_array(strtolower($trim), $nullLiterals, true)) {
+            if ('' === $trim || in_array(strtolower($trim), $nullLiterals, true)) {
                 $this->debug('String matched null literal', $debug, [
                     'field' => $field,
-                    'raw'   => $value,
+                    'raw' => $value,
                 ]);
+
                 return null;
             }
             $value = $trim; // keep a trimmed working value
@@ -227,6 +229,7 @@ final class LooseObjectMapper
                         'field' => $field,
                         'result' => $this->shortExport($decoded),
                     ]);
+
                     return $decoded;
                 }
             }
@@ -237,12 +240,12 @@ final class LooseObjectMapper
                     ?? (str_contains($value, '|') ? '|' : (str_contains($value, ',') ? ',' : '|'));
 
                 $parts = array_map('trim', explode($delim, $value));
-                $result = array_values(array_filter($parts, static fn($s) => $s !== ''));
+                $result = array_values(array_filter($parts, static fn ($s) => '' !== $s));
 
                 $this->debug('Array coercion via delimiter', $debug, [
-                    'field'    => $field,
-                    'delim'    => $delim,
-                    'result'   => $this->shortExport($result),
+                    'field' => $field,
+                    'delim' => $delim,
+                    'result' => $this->shortExport($result),
                 ]);
 
                 return $result;
@@ -251,9 +254,10 @@ final class LooseObjectMapper
             // 3) Optionally wrap scalars to array
             if ($wrapScalarArray && !is_array($value)) {
                 $this->debug('Array coercion via wrapScalarArray', $debug, [
-                    'field'  => $field,
+                    'field' => $field,
                     'result' => $this->shortExport([$value]),
                 ]);
+
                 return [$value];
             }
 
@@ -267,38 +271,38 @@ final class LooseObjectMapper
             }
             if (is_string($value)) {
                 $low = strtolower($value);
-                if (in_array($low, ['true','false'], true)) {
-                    return $low === 'true';
+                if (in_array($low, ['true', 'false'], true)) {
+                    return 'true' === $low;
                 }
-                if (in_array($low, ['yes','y','on','1'], true)) {
+                if (in_array($low, ['yes', 'y', 'on', '1'], true)) {
                     return true;
                 }
-                if (in_array($low, ['no','n','off','0'], true)) {
+                if (in_array($low, ['no', 'n', 'off', '0'], true)) {
                     return false;
                 }
             }
             if (is_int($value)) {
-                return $value === 1;
+                return 1 === $value;
             }
             if (is_float($value)) {
-                return (int)$value === 1;
+                return 1 === (int) $value;
             }
         }
 
         // Heuristic: fields that start with "is" or "has" can coerce 1/0 to bool safely
         if ($this->looksBooleanField($field)) {
-            if (is_string($value) && ($value === '1' || $value === '0')) {
-                return $value === '1';
+            if (is_string($value) && ('1' === $value || '0' === $value)) {
+                return '1' === $value;
             }
             if (is_int($value) || is_float($value)) {
-                return (int)$value === 1;
+                return 1 === (int) $value;
             }
         }
 
         // INT expectations
         if ($type->isIdentifiedBy(TypeIdentifier::INT) && $coerceScalars) {
             if (is_string($value) && preg_match('/^-?\d+$/', $value)) {
-                $hasLeadingZero = strlen($value) > 1 && $value[0] === '0';
+                $hasLeadingZero = strlen($value) > 1 && '0' === $value[0];
                 if (!$hasLeadingZero || $this->looksNumericField($field)) {
                     return (int) $value;
                 }
@@ -324,41 +328,62 @@ final class LooseObjectMapper
             if (is_string($value)) {
                 // ISO 8601
                 if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})$/', $value)) {
-                    try { return new DateTimeImmutable($value); } catch (\Throwable) {}
+                    try {
+                        return new \DateTimeImmutable($value);
+                    } catch (\Throwable) {
+                    }
                 }
                 // YYYY-MM-DD (date only)
                 if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
-                    try { return new DateTimeImmutable($value . 'T00:00:00Z'); } catch (\Throwable) {}
+                    try {
+                        return new \DateTimeImmutable($value.'T00:00:00Z');
+                    } catch (\Throwable) {
+                    }
                 }
                 // US m/d/yy or m/d/yyyy
                 if (preg_match('#^\d{1,2}/\d{1,2}/\d{2,4}$#', $value)) {
                     [$m,$d,$y] = array_map('intval', explode('/', $value));
-                    if ($y < 100) { $y += ($y >= 70 ? 1900 : 2000); }
+                    if ($y < 100) {
+                        $y += ($y >= 70 ? 1900 : 2000);
+                    }
                     $iso = sprintf('%04d-%02d-%02dT00:00:00Z', $y, $m, $d);
-                    try { return new DateTimeImmutable($iso); } catch (\Throwable) {}
+                    try {
+                        return new \DateTimeImmutable($iso);
+                    } catch (\Throwable) {
+                    }
                 }
                 // Unix epoch seconds (10 digits) or milliseconds (13 digits)
                 if (preg_match('/^\d{10}(\d{3})?$/', $value)) {
-                    $ts = (int) (strlen($value) === 13 ? substr($value, 0, 10) : $value);
-                    try { return (new DateTimeImmutable())->setTimestamp($ts); } catch (\Throwable) {}
+                    $ts = (int) (13 === strlen($value) ? substr($value, 0, 10) : $value);
+                    try {
+                        return (new \DateTimeImmutable())->setTimestamp($ts);
+                    } catch (\Throwable) {
+                    }
                 }
             }
             if (is_int($value)) {
-                try { return (new DateTimeImmutable())->setTimestamp($value); } catch (\Throwable) {}
+                try {
+                    return (new \DateTimeImmutable())->setTimestamp($value);
+                } catch (\Throwable) {
+                }
             }
             if (is_float($value)) {
-                try { return (new DateTimeImmutable())->setTimestamp((int)$value); } catch (\Throwable) {}
+                try {
+                    return (new \DateTimeImmutable())->setTimestamp((int) $value);
+                } catch (\Throwable) {
+                }
             }
         }
 
         // JSON object embedded as string (leave arrays for the ARRAY branch above)
         if (is_string($value) && $this->looksLikeJsonObject($value)) {
             $decoded = json_decode($this->normalizeJsonQuotes($value), true);
-            if (json_last_error() === JSON_ERROR_NONE) {
+            if (JSON_ERROR_NONE === json_last_error()) {
                 $this->debug('Object coercion via JSON decode', $debug, [
-                    'field'  => $field,
+                    'field' => $field,
                     'result' => $this->shortExport($decoded),
                 ]);
+
                 return $decoded;
             }
         }
@@ -374,10 +399,11 @@ final class LooseObjectMapper
     private function looksNumericField(string $field): bool
     {
         static $hints = [
-            'id','count','index','position','rank','duration','size',
-            'budget','revenue','popularity','score','rating','price','quantity',
-            'voteCount','voteAverage','runtime','year','page','pages','length','height','width',
+            'id', 'count', 'index', 'position', 'rank', 'duration', 'size',
+            'budget', 'revenue', 'popularity', 'score', 'rating', 'price', 'quantity',
+            'voteCount', 'voteAverage', 'runtime', 'year', 'page', 'pages', 'length', 'height', 'width',
         ];
+
         return in_array($field, $hints, true);
     }
 
@@ -406,13 +432,14 @@ final class LooseObjectMapper
             $key = (new UnicodeString($normalizedKey))->snake()->toString();
 
             $this->debug('normalizeKeysToSnake()', $debug, [
-                'original_key'   => (string)$k,
+                'original_key' => (string) $k,
                 'normalized_key' => $normalizedKey,
-                'snake_key'      => $key,
+                'snake_key' => $key,
             ]);
 
             $out[$key] = is_array($v) ? $this->normalizeKeysToSnake($v, $debug) : $v;
         }
+
         return $out;
     }
 
@@ -421,13 +448,15 @@ final class LooseObjectMapper
     private function looksLikeJsonArray(string $s): bool
     {
         $s = ltrim($s);
-        return $s !== '' && ($s[0] === '[');
+
+        return '' !== $s && ('[' === $s[0]);
     }
 
     private function looksLikeJsonObject(string $s): bool
     {
         $s = ltrim($s);
-        return $s !== '' && ($s[0] === '{');
+
+        return '' !== $s && ('{' === $s[0]);
     }
 
     /** Accepts single-quoted arrays/objects by swapping to double quotes when safe. */
@@ -435,7 +464,7 @@ final class LooseObjectMapper
     {
         // quick path: already valid JSON
         json_decode($s);
-        if (json_last_error() === JSON_ERROR_NONE) {
+        if (JSON_ERROR_NONE === json_last_error()) {
             return $s;
         }
         // allow very common CSV form: ['a','b'] or {'k':'v'}
@@ -443,6 +472,7 @@ final class LooseObjectMapper
         if (preg_match('/^\s*[\[\{].*[\]\}]\s*$/s', $s)) {
             return preg_replace("/'/", '"', $s) ?? $s;
         }
+
         return $s;
     }
 
@@ -450,7 +480,8 @@ final class LooseObjectMapper
     {
         $norm = $this->normalizeJsonQuotes($s);
         $decoded = json_decode($norm, true);
-        return (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : null;
+
+        return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : null;
     }
 
     // --- Convenience name transforms & row key resolution ---
@@ -469,6 +500,7 @@ final class LooseObjectMapper
             fn ($p) => (new UnicodeString($p))->title()->toString(),
             array_filter(explode('_', (string) $u))
         );
+
         return lcfirst(implode('', $parts));
     }
 
@@ -499,6 +531,7 @@ final class LooseObjectMapper
                 $out[] = $c;
             }
         }
+
         return $out;
     }
 
@@ -509,7 +542,7 @@ final class LooseObjectMapper
     public function resolveRowKey(array $row, string $field, bool $debug = false): ?string
     {
         $this->debug('resolveRowKey() start', $debug, [
-            'field'   => $field,
+            'field' => $field,
             'rowKeys' => array_keys($row),
         ]);
 
@@ -517,9 +550,10 @@ final class LooseObjectMapper
         foreach ($this->keyCandidates($field) as $cand) {
             if (array_key_exists($cand, $row)) {
                 $this->debug('resolveRowKey(): direct candidate hit', $debug, [
-                    'field'    => $field,
-                    'candidate'=> $cand,
+                    'field' => $field,
+                    'candidate' => $cand,
                 ]);
+
                 return $cand;
             }
         }
@@ -530,12 +564,13 @@ final class LooseObjectMapper
             $lc = strtolower($cand);
             if (array_key_exists($lc, $lowerMap)) {
                 foreach ($row as $orig => $_) {
-                    if (strtolower((string)$orig) === $lc) {
+                    if (strtolower((string) $orig) === $lc) {
                         $this->debug('resolveRowKey(): case-insensitive hit', $debug, [
                             'field' => $field,
-                            'orig'  => $orig,
-                            'lc'    => $lc,
+                            'orig' => $orig,
+                            'lc' => $lc,
                         ]);
+
                         return $orig;
                     }
                 }
@@ -544,15 +579,16 @@ final class LooseObjectMapper
 
         // 3) Canonical “squashed” match: handles Identification.ID vs identificationID, etc.
         $targetCanonical = $this->canonicalKey($field);
-        if ($targetCanonical !== '') {
+        if ('' !== $targetCanonical) {
             foreach ($row as $orig => $_) {
-                if ($this->canonicalKey((string)$orig) === $targetCanonical) {
+                if ($this->canonicalKey((string) $orig) === $targetCanonical) {
                     $this->debug('resolveRowKey(): canonical hit', $debug, [
-                        'field'    => $field,
-                        'orig'     => $orig,
-                        'canonical'=> $targetCanonical,
+                        'field' => $field,
+                        'orig' => $orig,
+                        'canonical' => $targetCanonical,
                     ]);
-                    return (string)$orig;
+
+                    return (string) $orig;
                 }
             }
         }
@@ -580,7 +616,7 @@ final class LooseObjectMapper
     private function resolveByCanonical(object $object, string $snakeKey, bool $debug): ?string
     {
         $targetCanonical = $this->canonicalKey($snakeKey);
-        if ($targetCanonical === '') {
+        if ('' === $targetCanonical) {
             return null;
         }
 
@@ -589,9 +625,10 @@ final class LooseObjectMapper
                 && $this->pa->isWritable($object, $rp->getName())) {
                 $this->debug('resolveByCanonical() hit', $debug, [
                     'snake_key' => $snakeKey,
-                    'prop'      => $rp->getName(),
+                    'prop' => $rp->getName(),
                     'canonical' => $targetCanonical,
                 ]);
+
                 return $rp->getName();
             }
         }
@@ -606,11 +643,11 @@ final class LooseObjectMapper
     {
         // IdentificationId → IdentificationID
         if (str_ends_with($prop, 'Id')) {
-            $alt = substr($prop, 0, -2) . 'ID';
+            $alt = substr($prop, 0, -2).'ID';
             $writable = $this->pa->isWritable($object, $alt);
 
             $this->debug('resolveAcronymProperty() Id→ID heuristic', $debug, [
-                'prop'     => $prop,
+                'prop' => $prop,
                 'alt_prop' => $alt,
                 'writable' => $writable,
             ]);
@@ -634,26 +671,25 @@ final class LooseObjectMapper
         }
 
         $suffix = '';
-        if ($context !== []) {
-            $suffix = ' ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ([] !== $context) {
+            $suffix = ' '.json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
-        error_log('[LooseObjectMapper] ' . $msg . $suffix);
+        error_log('[LooseObjectMapper] '.$msg.$suffix);
     }
 
     private function shortExport(mixed $value): string
     {
-        if (is_scalar($value) || $value === null) {
+        if (is_scalar($value) || null === $value) {
             return (string) var_export($value, true);
         }
         if (is_array($value)) {
-            return 'array(' . count($value) . ')';
+            return 'array('.count($value).')';
         }
         if (is_object($value)) {
-            return 'object(' . $value::class . ')';
+            return 'object('.$value::class.')';
         }
 
         return get_debug_type($value);
     }
 }
-

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
@@ -19,7 +20,7 @@ final class JsonRowProvider implements RowProviderInterface
 
     public function supports(string $ext): bool
     {
-        return $ext === 'json';
+        return 'json' === $ext;
     }
 
     public function iterate(string $path, ProviderContext $ctx): \Generator
@@ -27,20 +28,15 @@ final class JsonRowProvider implements RowProviderInterface
         // halaxa/json-machine is a soft dependency: stream with it when present.
         if (class_exists(Items::class)) {
             yield from $this->iterateStreaming($path, $ctx);
+
             return;
         }
 
         // Not installed: the in-memory path is fine for small files, but a large
         // file would balloon into a multi-GB PHP array. Refuse with a hint.
         $size = @filesize($path);
-        if ($size !== false && $size >= self::STREAM_THRESHOLD_BYTES) {
-            throw new \RuntimeException(sprintf(
-                'JSON file "%s" is %.1f MB; decoding it in memory would likely exhaust '
-                . 'the PHP memory_limit. Install the streaming reader to import large '
-                . 'JSON files: composer require halaxa/json-machine',
-                $path,
-                $size / 1024 / 1024,
-            ));
+        if (false !== $size && $size >= self::STREAM_THRESHOLD_BYTES) {
+            throw new \RuntimeException(sprintf('JSON file "%s" is %.1f MB; decoding it in memory would likely exhaust the PHP memory_limit. Install the streaming reader to import large JSON files: composer require halaxa/json-machine', $path, $size / 1024 / 1024));
         }
 
         yield from $this->iterateInMemory($path, $ctx);
@@ -53,7 +49,7 @@ final class JsonRowProvider implements RowProviderInterface
      */
     private function iterateStreaming(string $path, ProviderContext $ctx): \Generator
     {
-        $pointer = $ctx->rootKey !== null ? '/' . $ctx->rootKey : '';
+        $pointer = null !== $ctx->rootKey ? '/'.$ctx->rootKey : '';
 
         // assoc=true => rows are associative arrays, matching json_decode(..., true).
         $items = Items::fromFile($path, [
@@ -79,7 +75,7 @@ final class JsonRowProvider implements RowProviderInterface
             $object[$key] = $value;
         }
 
-        if ($isList === false) {
+        if (false === $isList) {
             yield $object;
         }
     }
@@ -90,7 +86,7 @@ final class JsonRowProvider implements RowProviderInterface
     private function iterateInMemory(string $path, ProviderContext $ctx): \Generator
     {
         $contents = \file_get_contents($path);
-        if ($contents === false) {
+        if (false === $contents) {
             throw new \RuntimeException(sprintf('Unable to read JSON file "%s".', $path));
         }
 
@@ -101,13 +97,9 @@ final class JsonRowProvider implements RowProviderInterface
 
         $items = $decoded;
 
-        if ($ctx->rootKey !== null) {
+        if (null !== $ctx->rootKey) {
             if (!\array_key_exists($ctx->rootKey, $decoded)) {
-                throw new \RuntimeException(sprintf(
-                    'Root key "%s" not found in JSON. Available keys: %s',
-                    $ctx->rootKey,
-                    implode(', ', array_keys($decoded))
-                ));
+                throw new \RuntimeException(sprintf('Root key "%s" not found in JSON. Available keys: %s', $ctx->rootKey, implode(', ', array_keys($decoded))));
             }
             $items = $decoded[$ctx->rootKey];
             if (!\is_array($items)) {
@@ -121,6 +113,7 @@ final class JsonRowProvider implements RowProviderInterface
                     yield $item;
                 }
             }
+
             return;
         }
 

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\MessageHandler;
@@ -10,8 +11,8 @@ use Survos\ImportBundle\Entity\FetchRecord;
 use Survos\ImportBundle\Event\FetchPageFetchedEvent;
 use Survos\ImportBundle\Event\FetchPageStoredEvent;
 use Survos\ImportBundle\Message\FetchPageMessage;
-use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[AsMessageHandler]
@@ -68,7 +69,7 @@ final class FetchPageMessageHandler
                 'contentType' => $event->contentType ?? ($response->getHeaders(false)['content-type'][0] ?? null),
             ]);
 
-            if ($event->rows === []) {
+            if ([] === $event->rows) {
                 throw new \RuntimeException(sprintf('No rows were produced for %s page %d.', $page->datasetKey, $page->pageNumber));
             }
 
@@ -79,7 +80,7 @@ final class FetchPageMessageHandler
             $written = 0;
             foreach (array_values($event->rows) as $rowNumber => $row) {
                 $payload = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if ($payload === false) {
+                if (false === $payload) {
                     throw new \RuntimeException(sprintf('Failed encoding row %d for %s page %d.', $rowNumber, $page->datasetKey, $page->pageNumber));
                 }
 
@@ -89,7 +90,7 @@ final class FetchPageMessageHandler
                     ? (string) $row['_recordType']
                     : (isset($row['type']) && is_scalar($row['type']) ? (string) $row['type'] : null);
                 $this->entityManager->persist($record);
-                $written++;
+                ++$written;
             }
 
             $page->archivePath = $event->archivePath;
@@ -129,7 +130,7 @@ final class FetchPageMessageHandler
     private function fetchWithRetry(FetchPage $page): \Symfony\Contracts\HttpClient\ResponseInterface
     {
         $last = null;
-        for ($attempt = 1; $attempt <= 5; $attempt++) {
+        for ($attempt = 1; $attempt <= 5; ++$attempt) {
             try {
                 $response = $this->httpClient->request('GET', $page->url, [
                     'headers' => array_filter([
@@ -139,7 +140,7 @@ final class FetchPageMessageHandler
                     'timeout' => 30,
                 ]);
 
-                if ($response->getStatusCode() !== 200) {
+                if (200 !== $response->getStatusCode()) {
                     throw new \RuntimeException(sprintf('HTTP %d', $response->getStatusCode()));
                 }
 

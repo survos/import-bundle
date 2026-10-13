@@ -24,13 +24,14 @@ namespace Survos\ImportBundle\Service;
 final class DtoClassResolver
 {
     /**
-     * @param array<string, class-string> $explicit        dataset → FQCN
-     * @param list<string>                $namespaceRoots  e.g. ['App\Dto', 'App\Dto\Source']
+     * @param array<string, class-string> $explicit       dataset → FQCN
+     * @param list<string>                $namespaceRoots e.g. ['App\Dto', 'App\Dto\Source']
      */
     public function __construct(
         private readonly array $explicit = [],
         private readonly array $namespaceRoots = [],
-    ) {}
+    ) {
+    }
 
     /** @return class-string|null */
     public function resolve(string $dataset): ?string
@@ -61,11 +62,11 @@ final class DtoClassResolver
         $candidates = [];
         foreach ($this->namespaceRoots as $root) {
             if ($c) {
-                $candidates[] = $root . '\\' . $c . '\\Obj';           // App\Dto\Aust\Obj
-                $candidates[] = $root . '\\' . $p . '\\' . $c . '\\Obj'; // App\Dto\Mus\Aust\Obj
+                $candidates[] = $root.'\\'.$c.'\\Obj';           // App\Dto\Aust\Obj
+                $candidates[] = $root.'\\'.$p.'\\'.$c.'\\Obj'; // App\Dto\Mus\Aust\Obj
             }
-            $candidates[] = $root . '\\' . $p . '\\' . $p . 'Obj';     // App\Dto\Dc\DcObj
-            $candidates[] = $root . '\\' . $p . 'Obj';                  // App\Dto\DcObj
+            $candidates[] = $root.'\\'.$p.'\\'.$p.'Obj';     // App\Dto\Dc\DcObj
+            $candidates[] = $root.'\\'.$p.'Obj';                  // App\Dto\DcObj
         }
 
         return $candidates;
@@ -74,8 +75,9 @@ final class DtoClassResolver
     private function classify(string $value): string
     {
         $parts = preg_split('/[^A-Za-z0-9]+/', $value) ?: [];
+
         return implode('', array_map(
-            static fn(string $p): string => ucfirst(strtolower($p)),
+            static fn (string $p): string => ucfirst(strtolower($p)),
             array_filter($parts)
         ));
     }

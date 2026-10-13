@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Util;
@@ -14,6 +15,7 @@ trait FlushEveryTrait
     public function setFlushEvery(int $n): static
     {
         $this->flushEvery = max(1, $n);
+
         return $this;
     }
 

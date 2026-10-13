@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\EventListener;
@@ -17,7 +18,7 @@ final class ApplyProfileTransformsListener
         dd($event);
         $profilePath = $event->applyProfilePath;
 
-        if ($profilePath === null || $profilePath === '') {
+        if (null === $profilePath || '' === $profilePath) {
             return;
         }
         if (!is_file($profilePath)) {
@@ -25,7 +26,7 @@ final class ApplyProfileTransformsListener
         }
 
         $rules = $this->loadSplitRules($profilePath);
-        if ($rules === []) {
+        if ([] === $rules) {
             return;
         }
 
@@ -42,7 +43,7 @@ final class ApplyProfileTransformsListener
             $v = $row[$field];
 
             // already normalized
-            if (is_array($v) || $v === null) {
+            if (is_array($v) || null === $v) {
                 continue;
             }
             if (!is_scalar($v)) {
@@ -50,7 +51,7 @@ final class ApplyProfileTransformsListener
             }
 
             $s = (string) $v;
-            if ($s === '' || !str_contains($s, $rule['delimiter'])) {
+            if ('' === $s || !str_contains($s, $rule['delimiter'])) {
                 continue;
             }
 
@@ -58,7 +59,7 @@ final class ApplyProfileTransformsListener
             if ($rule['trim']) {
                 $parts = array_map('trim', $parts);
             }
-            $parts = array_values(array_filter($parts, static fn($p) => $p !== ''));
+            $parts = array_values(array_filter($parts, static fn ($p) => '' !== $p));
 
             if (count($parts) >= $rule['minParts']) {
                 $row[$field] = $parts;
@@ -94,14 +95,14 @@ final class ApplyProfileTransformsListener
             }
             $field = $r['field'] ?? null;
             $delim = $r['delimiter'] ?? null;
-            if (!is_string($field) || $field === '' || !is_string($delim) || $delim === '') {
+            if (!is_string($field) || '' === $field || !is_string($delim) || '' === $delim) {
                 continue;
             }
 
             $rules[$field] = [
                 'delimiter' => $delim,
-                'trim'      => (bool) ($r['trim'] ?? true),
-                'minParts'  => (int) ($r['minParts'] ?? 2),
+                'trim' => (bool) ($r['trim'] ?? true),
+                'minParts' => (int) ($r['minParts'] ?? 2),
             ];
         }
 

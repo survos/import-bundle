@@ -1,14 +1,17 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
+use Survos\DataContracts\Vocabulary\ItemField;
+use Survos\DataContracts\Vocabulary\MuseumVocab;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Event\ImportConvertRowEvent;
 use Survos\ImportBundle\Event\ImportConvertStartedEvent;
+use Survos\ImportBundle\IO\CsvWriter;
 use Survos\ImportBundle\Service\Provider\ProviderContext;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
-use Survos\ImportBundle\IO\CsvWriter;
 use Survos\JsonlBundle\IO\JsonlReader;
 use Survos\JsonlBundle\IO\JsonlWriter;
 use Survos\JsonlBundle\Sqlite\SqlProfiler;
@@ -19,34 +22,6 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
-use RuntimeException;
-
-use function array_filter;
-use function array_key_exists;
-use function array_values;
-use function explode;
-use function file_get_contents;
-use function in_array;
-use function is_array;
-use function is_file;
-use function is_numeric;
-use function is_scalar;
-use function json_decode;
-use function max;
-use function preg_match;
-use function realpath;
-use function rtrim;
-use function sprintf;
-use function str_starts_with;
-use function strlen;
-use function substr;
-use function is_dir;
-use function pathinfo;
-use function strtolower;
-use function preg_replace;
-use function trim;
-use Survos\DataContracts\Vocabulary\ItemField;
-use Survos\DataContracts\Vocabulary\MuseumVocab;
 
 /** File conversion with optional caller-owned event context. */
 final class ImportConverter
@@ -129,42 +104,46 @@ final class ImportConverter
         // The scalable SQL sidecar (.profile.db) is the canonical profile now. The
         // legacy in-memory .profile.json (inlines sample rows, OOMs on big cores) is
         // opt-in via --legacy-profile; --save-profile is kept as a deprecated alias.
-        $legacyProfile = $legacyProfile || ($saveProfile === true);
+        $legacyProfile = $legacyProfile || (true === $saveProfile);
 
-        $stage = strtolower(trim($stage));
-        if (!in_array($stage, ['raw', 'normalize', 'ai', 'enrich'], true)) {
-            $io->error(sprintf('Unsupported --stage=%s. Allowed values: raw, normalize, ai, enrich.', $stage));
+        $stage = \strtolower(\trim($stage));
+        if (!\in_array($stage, ['raw', 'normalize', 'ai', 'enrich'], true)) {
+            $io->error(\sprintf('Unsupported --stage=%s. Allowed values: raw, normalize, ai, enrich.', $stage));
+
             return Command::FAILURE;
         }
         $this->currentStage = $stage;
 
         $this->fieldOriginalNames = [];
-        $this->extraTags          = $this->parseExtraTags($tagsOption);
+        $this->extraTags = $this->parseExtraTags($tagsOption);
         $dumpRecord = $this->normalizeDumpRecord($dump, $io);
-        if ($dumpRecord === -1) {
+        if (-1 === $dumpRecord) {
             return Command::FAILURE;
         }
 
-        if ($input === null || $input === '') {
+        if (null === $input || '' === $input) {
             $io->error('Missing input. Pass an explicit input path; dataset/provider path inference is not supported.');
+
             return Command::FAILURE;
         }
-        if ($dataset !== null && $dataset !== '' && ($output === null || $output === '')) {
+        if (null !== $dataset && '' !== $dataset && (null === $output || '' === $output)) {
             $io->error('Pass an explicit output path when providing dataset event context.');
+
             return Command::FAILURE;
         }
 
         $input = \Survos\JsonlBundle\Util\Jsonl::resolvePath($input);
         if (!\is_file($input) && !\is_dir($input)) {
             $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
+
             return Command::FAILURE;
         }
 
-        if (is_dir($input)) {
+        if (\is_dir($input)) {
             $sourceInput = $input;
             $sourceExt = 'json_dir';
         } else {
-            $ext = strtolower(pathinfo($input, PATHINFO_EXTENSION));
+            $ext = \strtolower(\pathinfo($input, PATHINFO_EXTENSION));
             [$sourceInput, $sourceExt] = $this->normalizeInput($input, $ext, $zipPath, $io);
         }
 
@@ -179,11 +158,12 @@ final class ImportConverter
         // resetOutput() would unlink the input before we read it.
         if (!$profileOnly && \is_file($outputPath) && \is_file($sourceInput)
             && \realpath($outputPath) === \realpath($sourceInput)) {
-            if ($output !== null) {
+            if (null !== $output) {
                 $io->error('Input and output must be different files.');
+
                 return Command::FAILURE;
             }
-            $outputPath = preg_replace('/\.(jsonl|csv)(\.gz)?$/i', '.converted.$1$2', $outputPath, 1);
+            $outputPath = \preg_replace('/\.(jsonl|csv)(\.gz)?$/i', '.converted.$1$2', $outputPath, 1);
         }
 
         $profilePath = $this->defaultProfilePath($outputPath);
@@ -193,29 +173,29 @@ final class ImportConverter
         //  - provided with no value => use $profilePath
         //  - provided with value => that explicit file path
         $applyProfilePath = null;
-        if ($applyProfile !== null) {
-            $applyProfilePath = ($applyProfile === '') ? $profilePath : $applyProfile;
+        if (null !== $applyProfile) {
+            $applyProfilePath = ('' === $applyProfile) ? $profilePath : $applyProfile;
         }
 
-        if ($applyProfilePath !== null && !\is_file($applyProfilePath)) {
+        if (null !== $applyProfilePath && !\is_file($applyProfilePath)) {
             $io->warning(\sprintf('Apply-profile file not found: %s (skipping transforms)', $applyProfilePath));
             $applyProfilePath = null;
         }
-        if ($applyProfilePath !== null) {
+        if (null !== $applyProfilePath) {
             $io->note(\sprintf('Applying transforms from %s', $applyProfilePath));
         }
 
         $baseTags = [];
-        if ($dataset !== null) {
+        if (null !== $dataset) {
             $baseTags[] = $dataset;
         }
-        $baseTags[] = 'source:' . \basename($input);
-        $baseTags   = \array_values(\array_unique(\array_merge($baseTags, $this->extraTags)));
+        $baseTags[] = 'source:'.\basename($input);
+        $baseTags = \array_values(\array_unique(\array_merge($baseTags, $this->extraTags)));
 
         // Context is supplied by the caller, never inferred from a filename or directory.
         $registryDataset = $dataset ?? '';
 
-        if ($this->dispatcher && $registryDataset !== '') {
+        if ($this->dispatcher && '' !== $registryDataset) {
             $this->dispatcher->dispatch(
                 new ImportConvertStartedEvent(
                     $input,
@@ -239,8 +219,9 @@ final class ImportConverter
             $rejectedCount = null;
             $limitReached = false;
         } else {
-            if ($dumpRecord !== null) {
-                $io->section(sprintf('Dumping record %d from %s', $dumpRecord, $sourceInput));
+            if (null !== $dumpRecord) {
+                $io->section(\sprintf('Dumping record %d from %s', $dumpRecord, $sourceInput));
+
                 return $this->dumpRecord(
                     $io,
                     $sourceInput,
@@ -267,9 +248,9 @@ final class ImportConverter
 
             if ($csv) {
                 $writer = CsvWriter::open($outputPath);
-                
+
                 // For CSV input, preserve original header order by writing headers from source
-                if ($sourceExt === 'csv') {
+                if ('csv' === $sourceExt) {
                     $writer->writeHeadersFromSourceFile($sourceInput);
                 }
             } else {
@@ -290,14 +271,14 @@ final class ImportConverter
             // claims:fetch/claims:export). The legacy 40_ai file is gone — it dropped observation prose
             // and could stale-shadow the vault. No claims file → rows pass through unenriched.
             $claimRows = [];
-            if ($stage === 'enrich' && $claimsFile !== null && is_file($claimsFile)) {
+            if ('enrich' === $stage && null !== $claimsFile && \is_file($claimsFile)) {
                 $claimRows = $this->claimRowsFromVault($claimsFile);
             }
             $estimatedRows = $this->estimateSourceRows($sourceInput, (string) $input, $sourceExt);
             $this->startConvertProgress($io, $estimatedRows);
 
             foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
-                $attemptedCount++;
+                ++$attemptedCount;
                 // Long-batch safety valve. The per-row path is pure streaming (read → normalize →
                 // dispatch → write, nothing retained), but the heavy per-row churn — reflection,
                 // #[Map] DTOs, row events — produces cyclic garbage faster than PHP's default GC
@@ -312,7 +293,7 @@ final class ImportConverter
                 // normalized row; normalize maps the raw row. Both then dispatch the row event so the
                 // stage's listeners run — crucially, enrich must dispatch too, or the DB-backed
                 // AiEnrichRowListener (shared-claims projection) never fires.
-                if ($stage === 'enrich') {
+                if ('enrich' === $stage) {
                     $row = $this->mergeClaims($row, $claimRows);
                 } else {
                     $row = $this->rowNormalizer->normalizeRow($row);
@@ -326,19 +307,19 @@ final class ImportConverter
                     $index,
                     $applyProfilePath
                 );
-                $index++;
+                ++$index;
 
-                if ($row === null) {
-                    $rejectedCount++;
+                if (null === $row) {
+                    ++$rejectedCount;
                     $this->advanceConvertProgress($io);
                     continue;
                 }
 
                 $writer->write($row);
-                $count++;
+                ++$count;
                 $this->advanceConvertProgress($io);
 
-                if ($limit !== null && $count >= $limit) {
+                if (null !== $limit && $count >= $limit) {
                     $limitReached = true;
                     break;
                 }
@@ -356,9 +337,9 @@ final class ImportConverter
             // Name the core + where it landed so it's clear which stage/core this run wrote — e.g.
             // "100 per records → mus/cleveland/norm/per.jsonl". Relativise off the dataset key (robust
             // against the /platform symlink vs the data dir) so the path stays short.
-            $coreName = ($core !== null && $core !== '') ? $core : (string) \preg_replace('/\.jsonl(\.gz)?$/', '', \basename($outputPath));
+            $coreName = (null !== $core && '' !== $core) ? $core : (string) \preg_replace('/\.jsonl(\.gz)?$/', '', \basename($outputPath));
             $relativeOutput = $outputPath;
-            if ($dataset !== null && $dataset !== '' && ($pos = \strpos($outputPath, '/' . $dataset . '/')) !== false) {
+            if (null !== $dataset && '' !== $dataset && ($pos = \strpos($outputPath, '/'.$dataset.'/')) !== false) {
                 $relativeOutput = \substr($outputPath, $pos + 1);
             }
             $io->success(\sprintf(
@@ -373,12 +354,12 @@ final class ImportConverter
         }
 
         $tags = $baseTags;
-        $hasExportTag = in_array('export:csv', $tags, true) || in_array('export.csv', $tags, true);
+        $hasExportTag = \in_array('export:csv', $tags, true) || \in_array('export.csv', $tags, true);
 
         // Canonical profile: the scalable SQL sidecar (<output>.db). Always written for
         // JSONL output when the profiler is available — it streams the file (no OOM).
         $recordCount = null;
-        if ($profile && !$csv && $this->sqlProfiler !== null && \is_file($outputPath)) {
+        if ($profile && !$csv && null !== $this->sqlProfiler && \is_file($outputPath)) {
             $io->section('Profiling → SQL sidecar (.profile.db)');
             $t0 = \microtime(true);
             $result = $this->sqlProfiler->profile($outputPath);
@@ -413,20 +394,21 @@ final class ImportConverter
                     null,
                     $limit
                 );
-            } catch (RuntimeException $e) {
+            } catch (\RuntimeException $e) {
                 $io->error($e->getMessage());
+
                 return Command::FAILURE;
             }
 
-            $io->note(sprintf('CSV export wrote %d rows to %s', $result['recordCount'], $result['outputPath']));
+            $io->note(\sprintf('CSV export wrote %d rows to %s', $result['recordCount'], $result['outputPath']));
 
-            $dispatchTags = array_values(array_filter(
+            $dispatchTags = \array_values(\array_filter(
                 $dispatchTags,
-                static fn(string $tag): bool => !in_array($tag, ['export:csv', 'export.csv'], true)
+                static fn (string $tag): bool => !\in_array($tag, ['export:csv', 'export.csv'], true)
             ));
         }
 
-        if ($this->dispatcher && $registryDataset !== '') {
+        if ($this->dispatcher && '' !== $registryDataset) {
             $this->dispatcher->dispatch(
                 new ImportConvertFinishedEvent(
                     $input,
@@ -447,7 +429,7 @@ final class ImportConverter
 
     private function startConvertProgress(SymfonyStyle $io, ?int $estimatedRows): void
     {
-        $format = $estimatedRows === null || $estimatedRows <= 0
+        $format = null === $estimatedRows || $estimatedRows <= 0
             ? ' %current% [%bar%] elapsed:%elapsed:6s% memory:%memory:6s%'
             : ' %current%/%max% [%bar%] %percent:3s%% elapsed:%elapsed:6s% estimated:%estimated:-6s% memory:%memory:6s%';
 
@@ -467,13 +449,13 @@ final class ImportConverter
     private function estimateSourceRows(string $sourceInput, string $input, string $sourceExt): ?int
     {
         $rows = $this->readSidecarRowCount($sourceInput, $sourceExt);
-        if ($rows !== null) {
+        if (null !== $rows) {
             return $rows;
         }
 
         if ($input !== $sourceInput) {
             $rows = $this->readSidecarRowCount($input, $sourceExt);
-            if ($rows !== null) {
+            if (null !== $rows) {
                 return $rows;
             }
         }
@@ -483,7 +465,7 @@ final class ImportConverter
 
     private function estimateRowsFromSourceFile(string $path, string $sourceExt): ?int
     {
-        if (!in_array($sourceExt, ['csv', 'jsonl'], true) || !is_file($path)) {
+        if (!\in_array($sourceExt, ['csv', 'jsonl'], true) || !\is_file($path)) {
             return null;
         }
 
@@ -492,23 +474,23 @@ final class ImportConverter
         }
 
         $lines = $this->countPlainLines($path);
-        if ($lines === null) {
+        if (null === $lines) {
             return null;
         }
 
-        return $sourceExt === 'csv' ? max(0, $lines - 1) : $lines;
+        return 'csv' === $sourceExt ? \max(0, $lines - 1) : $lines;
     }
 
     private function countPlainLines(string $path): ?int
     {
         $handle = fopen($path, 'rb');
-        if ($handle === false) {
+        if (false === $handle) {
             return null;
         }
 
         $lines = 0;
-        while (fgets($handle) !== false) {
-            $lines++;
+        while (false !== fgets($handle)) {
+            ++$lines;
         }
         fclose($handle);
 
@@ -520,12 +502,12 @@ final class ImportConverter
         // GZIP stores the uncompressed size in the footer; combine it with a small
         // decompressed line sample to avoid a full pre-scan of large .jsonl.gz files.
         $uncompressedSize = $this->gzipUncompressedSize($path);
-        if ($uncompressedSize === null || $uncompressedSize <= 0) {
+        if (null === $uncompressedSize || $uncompressedSize <= 0) {
             return null;
         }
 
         $gz = gzopen($path, 'rb');
-        if ($gz === false) {
+        if (false === $gz) {
             return null;
         }
 
@@ -533,28 +515,28 @@ final class ImportConverter
         $bytes = 0;
         while (!gzeof($gz) && $lines < 1000) {
             $line = gzgets($gz);
-            if ($line === false) {
+            if (false === $line) {
                 break;
             }
 
-            $lines++;
-            $bytes += strlen($line);
+            ++$lines;
+            $bytes += \strlen($line);
         }
         gzclose($gz);
 
-        if ($lines === 0 || $bytes === 0) {
+        if (0 === $lines || 0 === $bytes) {
             return null;
         }
 
-        $estimatedLines = (int) max($lines, round($uncompressedSize / ($bytes / $lines)));
+        $estimatedLines = (int) \max($lines, round($uncompressedSize / ($bytes / $lines)));
 
-        return $sourceExt === 'csv' ? max(0, $estimatedLines - 1) : $estimatedLines;
+        return 'csv' === $sourceExt ? \max(0, $estimatedLines - 1) : $estimatedLines;
     }
 
     private function gzipUncompressedSize(string $path): ?int
     {
         $handle = fopen($path, 'rb');
-        if ($handle === false || fseek($handle, -4, SEEK_END) !== 0) {
+        if (false === $handle || 0 !== fseek($handle, -4, SEEK_END)) {
             if (is_resource($handle)) {
                 fclose($handle);
             }
@@ -565,44 +547,44 @@ final class ImportConverter
         $footer = fread($handle, 4);
         fclose($handle);
 
-        if ($footer === false || strlen($footer) !== 4) {
+        if (false === $footer || 4 !== \strlen($footer)) {
             return null;
         }
 
         $data = unpack('Vsize', $footer);
 
-        return is_array($data) ? (int) $data['size'] : null;
+        return \is_array($data) ? (int) $data['size'] : null;
     }
 
     private function readSidecarRowCount(string $path, string $sourceExt): ?int
     {
-        $sidecarPath = $path . '.sidecar.json';
-        if (!is_file($sidecarPath)) {
+        $sidecarPath = $path.'.sidecar.json';
+        if (!\is_file($sidecarPath)) {
             return null;
         }
 
-        $json = file_get_contents($sidecarPath);
-        if ($json === false || trim($json) === '') {
+        $json = \file_get_contents($sidecarPath);
+        if (false === $json || '' === \trim($json)) {
             return null;
         }
 
-        $decoded = json_decode($json, true);
-        if (!is_array($decoded)) {
+        $decoded = \json_decode($json, true);
+        if (!\is_array($decoded)) {
             return null;
         }
 
         foreach ([$decoded, $decoded['metadata'] ?? null, $decoded['sidecar'] ?? null, $decoded['file'] ?? null] as $candidate) {
-            if (!is_array($candidate)) {
+            if (!\is_array($candidate)) {
                 continue;
             }
 
             $lineCount = $this->firstPositiveCount($candidate, ['lineCount', 'line_count', 'totalLines', 'total_lines', 'lines']);
-            if ($lineCount !== null) {
-                return $sourceExt === 'csv' ? max(0, $lineCount - 1) : $lineCount;
+            if (null !== $lineCount) {
+                return 'csv' === $sourceExt ? \max(0, $lineCount - 1) : $lineCount;
             }
 
             $rowCount = $this->firstPositiveCount($candidate, ['recordCount', 'record_count', 'rows', 'records', 'count', 'total']);
-            if ($rowCount !== null) {
+            if (null !== $rowCount) {
                 return $rowCount;
             }
         }
@@ -612,12 +594,12 @@ final class ImportConverter
 
     /**
      * @param array<string, mixed> $data
-     * @param list<string> $keys
+     * @param list<string>         $keys
      */
     private function firstPositiveCount(array $data, array $keys): ?int
     {
         foreach ($keys as $key) {
-            if (!array_key_exists($key, $data) || !is_scalar($data[$key]) || !is_numeric($data[$key])) {
+            if (!\array_key_exists($key, $data) || !\is_scalar($data[$key]) || !\is_numeric($data[$key])) {
                 continue;
             }
 
@@ -632,16 +614,17 @@ final class ImportConverter
 
     private function normalizeDumpRecord(bool|int $dump, SymfonyStyle $io): ?int
     {
-        if ($dump === false) {
+        if (false === $dump) {
             return null;
         }
 
-        if ($dump === true) {
+        if (true === $dump) {
             return 1;
         }
 
         if ($dump < 1) {
             $io->error('--dump must be a positive integer.');
+
             return -1;
         }
 
@@ -659,24 +642,24 @@ final class ImportConverter
      */
     private function claimRowsFromVault(string $claimsFile): array
     {
-        if (!is_file($claimsFile)) {
+        if (!\is_file($claimsFile)) {
             return [];
         }
 
         $claimsById = [];
         $seen = [];
         foreach (JsonlReader::open($claimsFile) as $row) {
-            if (!is_array($row)) {
+            if (!\is_array($row)) {
                 continue;
             }
 
             $id = $row['subjectId'] ?? $row['subject_id'] ?? null;
             $predicate = $row['predicate'] ?? null;
-            if (!is_scalar($id) || !is_string($predicate) || !array_key_exists('value', $row)) {
+            if (!\is_scalar($id) || !is_string($predicate) || !\array_key_exists('value', $row)) {
                 continue;
             }
 
-            $key = (string) $id . '|' . $predicate;
+            $key = (string) $id.'|'.$predicate;
             if (isset($seen[$key])) {
                 continue; // already took the newest value for this subject+predicate
             }
@@ -692,14 +675,15 @@ final class ImportConverter
     }
 
     /**
-     * @param array<string,mixed> $row
+     * @param array<string,mixed>                                     $row
      * @param array<string,list<array{predicate:string,value:mixed}>> $claimRows
+     *
      * @return array<string,mixed>
      */
     private function mergeClaims(array $row, array $claimRows): array
     {
         $id = $row[ItemField::ID] ?? $row['id'] ?? null;
-        if (!is_scalar($id)) {
+        if (!\is_scalar($id)) {
             return $row;
         }
 
@@ -729,7 +713,7 @@ final class ImportConverter
 
     private static function isBlank(mixed $value): bool
     {
-        return $value === null || $value === [] || (is_string($value) && trim($value) === '');
+        return null === $value || [] === $value || (is_string($value) && '' === \trim($value));
     }
 
     /**
@@ -742,9 +726,9 @@ final class ImportConverter
         if (!is_string($value)) {
             return $value;
         }
-        $trimmed = trim($value);
-        if (\strlen($trimmed) >= 2 && $trimmed[0] === '"' && str_ends_with($trimmed, '"')) {
-            $decoded = json_decode($trimmed, true);
+        $trimmed = \trim($value);
+        if (\strlen($trimmed) >= 2 && '"' === $trimmed[0] && str_ends_with($trimmed, '"')) {
+            $decoded = \json_decode($trimmed, true);
             if (is_string($decoded)) {
                 return $decoded;
             }
@@ -771,7 +755,7 @@ final class ImportConverter
         $attempted = 0;
         $index = 0;
         foreach ($this->rowProviders->iterate($sourceInput, $sourceExt, $ctx) as $row) {
-            $attempted++;
+            ++$attempted;
             $rawRow = $this->rowNormalizer->normalizeRow($row);
             $normalizedRow = $this->applyRowCallbacks(
                 $rawRow,
@@ -781,7 +765,7 @@ final class ImportConverter
                 $index,
                 $applyProfilePath
             );
-            $index++;
+            ++$index;
 
             if ($attempted !== $dumpRecord) {
                 continue;
@@ -792,17 +776,17 @@ final class ImportConverter
             $other = [];
 
             foreach (($normalizedRow ?? []) as $key => $value) {
-                if (in_array($key, $canonicalFields, true)) {
+                if (\in_array($key, $canonicalFields, true)) {
                     $canonical[$key] = $value;
                 } else {
                     $other[$key] = $value;
                 }
             }
 
-            $io->section(sprintf('Raw Row #%d', $dumpRecord));
+            $io->section(\sprintf('Raw Row #%d', $dumpRecord));
             $io->writeln(json_encode($rawRow, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
-            $io->section(sprintf('Normalized Row #%d', $dumpRecord));
+            $io->section(\sprintf('Normalized Row #%d', $dumpRecord));
             $io->writeln(json_encode($normalizedRow, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
             $io->section('Canonical Fields');
@@ -814,7 +798,8 @@ final class ImportConverter
             return Command::SUCCESS;
         }
 
-        $io->warning(sprintf('Record %d not found; attempted %d row(s).', $dumpRecord, $attempted));
+        $io->warning(\sprintf('Record %d not found; attempted %d row(s).', $dumpRecord, $attempted));
+
         return Command::SUCCESS;
     }
 
@@ -844,14 +829,13 @@ final class ImportConverter
         ];
     }
 
-
     /**
      * Output path for a bare file conversion (no --output): a .jsonl sibling
      * of the source, so we never relocate the user's file under APP_DATA_DIR.
      */
     private function sourceAdjacentJsonlPath(string $input): string
     {
-        $dir      = \dirname($input);
+        $dir = \dirname($input);
         $filename = \basename($input);
 
         if (\str_ends_with(\strtolower($filename), '.gz')) {
@@ -864,7 +848,7 @@ final class ImportConverter
 
     private function defaultProfilePath(string $jsonlPath): string
     {
-        $dir      = \dirname($jsonlPath);
+        $dir = \dirname($jsonlPath);
         $filename = \basename($jsonlPath);
 
         // Strip .gz if present
@@ -881,7 +865,7 @@ final class ImportConverter
     private function ensureDir(string $filePath): void
     {
         $dir = \dirname($filePath);
-        if ($dir !== '' && !\is_dir($dir)) {
+        if ('' !== $dir && !\is_dir($dir)) {
             (new Filesystem())->mkdir($dir);
         }
     }
@@ -895,14 +879,14 @@ final class ImportConverter
         // twin would shadow (or be shadowed by) what this run writes.
         if (\preg_match('/\.jsonl(\.gz)?$/', $output)) {
             $twin = \str_ends_with($output, '.gz') ? \substr($output, 0, -3) : $output.'.gz';
-            $isSource = $source !== null && \is_file($twin) && \is_file($source) && \realpath($twin) === \realpath($source);
+            $isSource = null !== $source && \is_file($twin) && \is_file($source) && \realpath($twin) === \realpath($source);
             foreach ($isSource ? [] : [$twin, $twin.'.db'] as $stale) {
                 if (\is_file($stale)) {
                     \unlink($stale);
                 }
             }
         }
-        $idx = $output . '.idx.json';
+        $idx = $output.'.idx.json';
         if (\is_file($idx)) {
             \unlink($idx);
         }
@@ -913,12 +897,13 @@ final class ImportConverter
      */
     private function parseExtraTags(?string $tagsOption): array
     {
-        if ($tagsOption === null || $tagsOption === '') {
+        if (null === $tagsOption || '' === $tagsOption) {
             return [];
         }
 
         $parts = \array_map('trim', \explode(',', $tagsOption));
-        $parts = \array_filter($parts, static fn($t) => $t !== '');
+        $parts = \array_filter($parts, static fn ($t) => '' !== $t);
+
         return \array_values(\array_unique($parts));
     }
 
@@ -927,14 +912,14 @@ final class ImportConverter
         // Handle .gz compression
         $isCompressed = str_ends_with($path, '.gz');
         if ($isCompressed) {
-            $path = substr($path, 0, -3);
+            $path = \substr($path, 0, -3);
         }
 
         // Replace .jsonl or .json with .csv
         if (str_ends_with($path, '.jsonl')) {
-            $path = substr($path, 0, -6) . '.csv';
+            $path = \substr($path, 0, -6).'.csv';
         } elseif (str_ends_with($path, '.json')) {
-            $path = substr($path, 0, -5) . '.csv';
+            $path = \substr($path, 0, -5).'.csv';
         } elseif (!str_ends_with($path, '.csv')) {
             $path .= '.csv';
         }
@@ -951,7 +936,7 @@ final class ImportConverter
     {
         return match ($ext) {
             'zip' => $this->unpackZipInput($input, $zipPath, $io),
-            'gz'  => $this->unpackGzipInput($input, $io),
+            'gz' => $this->unpackGzipInput($input, $io),
             default => [$input, $ext],
         };
     }
@@ -960,7 +945,7 @@ final class ImportConverter
     {
         $io->note(\sprintf('ZIP input detected: %s', $zipPath));
         $zip = new \ZipArchive();
-        if ($zip->open($zipPath) !== true) {
+        if (true !== $zip->open($zipPath)) {
             throw new \RuntimeException(\sprintf('Unable to open ZIP file "%s".', $zipPath));
         }
 
@@ -968,13 +953,13 @@ final class ImportConverter
             $io->note(\sprintf('Using --zip-path filter: "%s"', $filterPath));
             $normalizedFilter = \rtrim($filterPath, '/');
             $index = $zip->locateName($normalizedFilter, \ZipArchive::FL_NOCASE);
-            if ($index === false) {
-                $index = $zip->locateName($normalizedFilter . '/', \ZipArchive::FL_NOCASE);
+            if (false === $index) {
+                $index = $zip->locateName($normalizedFilter.'/', \ZipArchive::FL_NOCASE);
             }
 
-            if ($index !== false) {
+            if (false !== $index) {
                 $name = $zip->getNameIndex($index);
-                if ($name === false) {
+                if (false === $name) {
                     $zip->close();
                     throw new \RuntimeException(\sprintf('Could not read entry at index %d in ZIP "%s".', $index, $zipPath));
                 }
@@ -982,15 +967,15 @@ final class ImportConverter
                 if (\str_ends_with($name, '/')) {
                     $dirName = $name;
                     $io->note(\sprintf('ZIP path "%s" is a directory; importing all records under it.', $dirName));
-                    $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_dir_' . \uniqid('', true);
+                    $tmpDir = \sys_get_temp_dir().'/import_bundle_zip_dir_'.\uniqid('', true);
                     if (!\mkdir($tmpDir, 0o777, true) && !\is_dir($tmpDir)) {
-                        throw new \RuntimeException(sprintf('Cannot create temp directory "%s".', $tmpDir));
+                        throw new \RuntimeException(\sprintf('Cannot create temp directory "%s".', $tmpDir));
                     }
                     $fileNames = [];
 
-                    for ($i = 0; $i < $zip->numFiles; $i++) {
+                    for ($i = 0; $i < $zip->numFiles; ++$i) {
                         $n = $zip->getNameIndex($i);
-                        if ($n === false) {
+                        if (false === $n) {
                             continue;
                         }
                         if (!\str_starts_with($n, $dirName) || \str_ends_with($n, '/')) {
@@ -1003,31 +988,24 @@ final class ImportConverter
                         $fileNames[] = $n;
                     }
 
-                    if ($fileNames === []) {
+                    if ([] === $fileNames) {
                         $zip->close();
-                        throw new \RuntimeException(\sprintf(
-                            'Directory "%s" inside ZIP "%s" does not contain JSON/JSONL/CSV files.',
-                            $dirName,
-                            $zipPath
-                        ));
+                        throw new \RuntimeException(\sprintf('Directory "%s" inside ZIP "%s" does not contain JSON/JSONL/CSV files.', $dirName, $zipPath));
                     }
 
                     if (!$zip->extractTo($tmpDir, $fileNames)) {
                         $zip->close();
-                        throw new \RuntimeException(\sprintf(
-                            'Failed to extract files from directory "%s" in ZIP "%s".',
-                            $dirName,
-                            $zipPath
-                        ));
+                        throw new \RuntimeException(\sprintf('Failed to extract files from directory "%s" in ZIP "%s".', $dirName, $zipPath));
                     }
 
                     $zip->close();
-                    $recordsDir = $tmpDir . '/' . \rtrim($dirName, '/');
+                    $recordsDir = $tmpDir.'/'.\rtrim($dirName, '/');
+
                     return [$recordsDir, 'json_dir'];
                 }
 
                 $ext = \strtolower(\pathinfo($name, \PATHINFO_EXTENSION));
-                $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_' . \uniqid('', true);
+                $tmpDir = \sys_get_temp_dir().'/import_bundle_zip_'.\uniqid('', true);
                 \mkdir($tmpDir, 0o777, true);
                 if (!$zip->extractTo($tmpDir, $name)) {
                     $zip->close();
@@ -1035,8 +1013,9 @@ final class ImportConverter
                 }
                 $zip->close();
 
-                $extractedPath = $tmpDir . '/' . $name;
+                $extractedPath = $tmpDir.'/'.$name;
                 $io->note(\sprintf('ZIP extracted via --zip-path: %s (.%s)', $extractedPath, $ext));
+
                 return [$extractedPath, $ext];
             }
 
@@ -1046,12 +1025,12 @@ final class ImportConverter
 
         // Heuristic: first CSV/JSON/JSONL file
         $candidateName = null;
-        $candidateExt  = null;
-        $priority      = ['csv', 'json', 'jsonl'];
+        $candidateExt = null;
+        $priority = ['csv', 'json', 'jsonl'];
 
-        for ($i = 0; $i < $zip->numFiles; $i++) {
+        for ($i = 0; $i < $zip->numFiles; ++$i) {
             $name = $zip->getNameIndex($i);
-            if ($name === false || \str_ends_with($name, '/')) {
+            if (false === $name || \str_ends_with($name, '/')) {
                 continue;
             }
             $ext = \strtolower(\pathinfo($name, \PATHINFO_EXTENSION));
@@ -1059,17 +1038,17 @@ final class ImportConverter
                 continue;
             }
             $candidateName = $name;
-            $candidateExt  = $ext;
+            $candidateExt = $ext;
             break;
         }
 
-        if ($candidateName === null || $candidateExt === null) {
+        if (null === $candidateName || null === $candidateExt) {
             $zip->close();
             throw new \RuntimeException(\sprintf('ZIP "%s" does not contain CSV/JSON/JSONL.', $zipPath));
         }
 
         $io->note(\sprintf('Using "%s" from ZIP (.%s)', $candidateName, $candidateExt));
-        $tmpDir = \sys_get_temp_dir() . '/import_bundle_zip_' . \uniqid('', true);
+        $tmpDir = \sys_get_temp_dir().'/import_bundle_zip_'.\uniqid('', true);
         \mkdir($tmpDir, 0o777, true);
         if (!$zip->extractTo($tmpDir, $candidateName)) {
             $zip->close();
@@ -1077,43 +1056,40 @@ final class ImportConverter
         }
         $zip->close();
 
-        return [$tmpDir . '/' . $candidateName, $candidateExt];
+        return [$tmpDir.'/'.$candidateName, $candidateExt];
     }
 
     private function unpackGzipInput(string $gzPath, SymfonyStyle $io): array
     {
         $io->note(\sprintf('GZIP input detected: %s', $gzPath));
-        $base     = \pathinfo($gzPath, \PATHINFO_FILENAME);
+        $base = \pathinfo($gzPath, \PATHINFO_FILENAME);
         $innerExt = \strtolower(\pathinfo($base, \PATHINFO_EXTENSION));
 
-        if ($innerExt === '') {
-            throw new \RuntimeException(\sprintf(
-                'Cannot infer underlying extension from GZIP "%s". Expected ".csv.gz", ".json.gz", or ".jsonl.gz".',
-                $gzPath
-            ));
+        if ('' === $innerExt) {
+            throw new \RuntimeException(\sprintf('Cannot infer underlying extension from GZIP "%s". Expected ".csv.gz", ".json.gz", or ".jsonl.gz".', $gzPath));
         }
 
-        if ($innerExt === 'jsonl') {
+        if ('jsonl' === $innerExt) {
             return [$gzPath, $innerExt];
         }
 
-        $tmpDir  = \sys_get_temp_dir() . '/import_bundle_gz_' . \uniqid('', true);
+        $tmpDir = \sys_get_temp_dir().'/import_bundle_gz_'.\uniqid('', true);
         \mkdir($tmpDir, 0o777, true);
-        $outPath = $tmpDir . '/' . $base;
+        $outPath = $tmpDir.'/'.$base;
 
         $gz = \gzopen($gzPath, 'rb');
-        if ($gz === false) {
+        if (false === $gz) {
             throw new \RuntimeException(\sprintf('Unable to open GZIP "%s".', $gzPath));
         }
         $out = \fopen($outPath, 'wb');
-        if ($out === false) {
+        if (false === $out) {
             \gzclose($gz);
             throw new \RuntimeException(\sprintf('Unable to create temporary file "%s".', $outPath));
         }
 
         while (!\gzeof($gz)) {
             $chunk = \gzread($gz, 8192);
-            if ($chunk === false) {
+            if (false === $chunk) {
                 break;
             }
             \fwrite($out, $chunk);
@@ -1123,6 +1099,7 @@ final class ImportConverter
         \fclose($out);
 
         $io->note(\sprintf('GZIP decompressed to %s (.%s)', $outPath, $innerExt));
+
         return [$outPath, $innerExt];
     }
 
@@ -1137,17 +1114,17 @@ final class ImportConverter
         int $index,
         ?string $applyProfilePath = null,
     ): ?array {
-        if ($this->dispatcher === null) {
+        if (null === $this->dispatcher) {
             return $row;
         }
 
         $tags = [];
-        if ($dataset !== null) {
+        if (null !== $dataset) {
             $tags[] = $dataset;
         }
-        $tags[] = 'format:' . $format;
-        $tags[] = 'source:' . \basename($input);
-        $tags   = \array_values(\array_unique(\array_merge($tags, $this->extraTags)));
+        $tags[] = 'format:'.$format;
+        $tags[] = 'source:'.\basename($input);
+        $tags = \array_values(\array_unique(\array_merge($tags, $this->extraTags)));
 
         $event = new ImportConvertRowEvent(
             $row,
@@ -1163,14 +1140,13 @@ final class ImportConverter
 
         $this->dispatcher->dispatch($event);
 
-        if ($event->row === null) {
+        if (null === $event->row) {
             return null;
         }
-        if ($event->status !== null && $event->status !== ImportConvertRowEvent::STATUS_OKAY) {
+        if (null !== $event->status && ImportConvertRowEvent::STATUS_OKAY !== $event->status) {
             return null;
         }
 
         return $event->row;
     }
-
 }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
@@ -11,15 +12,13 @@ final class XlsxRowProvider implements RowProviderInterface
 {
     public function supports(string $ext): bool
     {
-        return $ext === 'xlsx' || $ext === 'xls';
+        return 'xlsx' === $ext || 'xls' === $ext;
     }
 
     public function iterate(string $path, ProviderContext $ctx): \Generator
     {
         if (!class_exists(IOFactory::class)) {
-            throw new \RuntimeException(
-                'Excel support requires phpoffice/phpspreadsheet. Install it with: composer require phpoffice/phpspreadsheet'
-            );
+            throw new \RuntimeException('Excel support requires phpoffice/phpspreadsheet. Install it with: composer require phpoffice/phpspreadsheet');
         }
 
         // No setReadDataOnly(true): that skips cell styles, so a date-formatted cell's
@@ -46,7 +45,7 @@ final class XlsxRowProvider implements RowProviderInterface
             $blank = true;
             foreach ($record as $i => $value) {
                 $key = $headerKeys[$i] ?? (string) $i;
-                if ($value !== null && $value !== '') {
+                if (null !== $value && '' !== $value) {
                     $blank = false;
                 }
                 $normalizedRow[$key] = $value;
@@ -62,13 +61,13 @@ final class XlsxRowProvider implements RowProviderInterface
 
     private function normalizeHeaderName(string $name): string
     {
-        $name  = \trim($name);
+        $name = \trim($name);
         $parts = \preg_split('/[^A-Za-z0-9]+/', $name, -1, \PREG_SPLIT_NO_EMPTY) ?: [];
-        if ($parts === []) {
+        if ([] === $parts) {
             return 'field';
         }
 
-        $parts = \array_map(static fn($p) => \strtolower($p), $parts);
+        $parts = \array_map(static fn ($p) => \strtolower($p), $parts);
 
         $camel = \array_shift($parts);
         foreach ($parts as $p) {
@@ -76,7 +75,7 @@ final class XlsxRowProvider implements RowProviderInterface
         }
 
         if (!\preg_match('/^[A-Za-z_]/', $camel)) {
-            $camel = '_' . $camel;
+            $camel = '_'.$camel;
         }
 
         return $camel;

@@ -1,8 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 use Castor\Attribute\AsTask;
 
-use function Castor\{io, run, fs, variable};
+use function Castor\fs;
+use function Castor\io;
+use function Castor\run;
 
 // Configuration - can be overridden via castor.yaml or environment
 
@@ -13,7 +17,7 @@ function setup(): void
     if (!fs()->exists('.env.local')) {
         $dbUrl = 'DATABASE_URL="sqlite:///%kernel.project_dir%/var/data.db"';
 
-        fs()->appendToFile('.env.local', $dbUrl . PHP_EOL);
+        fs()->appendToFile('.env.local', $dbUrl.PHP_EOL);
         io()->success('Created .env.local with SQLite configuration');
     } else {
         io()->note('.env.local already exists');

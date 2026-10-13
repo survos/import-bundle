@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
@@ -15,7 +16,7 @@ final class JsonDirRowProvider implements RowProviderInterface
 
     public function supports(string $ext): bool
     {
-        return $ext === 'json_dir';
+        return 'json_dir' === $ext;
     }
 
     public function iterate(string $path, ProviderContext $ctx): \Generator
@@ -37,8 +38,8 @@ final class JsonDirRowProvider implements RowProviderInterface
                 continue;
             }
 
-            $ext  = strtolower($file->getExtension());
-            $p    = $file->getPathname();
+            $ext = strtolower($file->getExtension());
+            $p = $file->getPathname();
 
             if (!\in_array($ext, ['json', 'jsonl', 'csv'], true)) {
                 continue;

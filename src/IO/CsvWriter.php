@@ -1,25 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\IO;
 
-use League\Csv\Writer as LeagueCsvWriter;
 use League\Csv\CannotInsertRecord;
-use RuntimeException;
-use SplFileObject;
-
-use function array_keys;
-use function array_merge;
-use function fclose;
-use function fgetcsv;
-use function fopen;
-use function fwrite;
-use function implode;
-use function is_file;
-use function sprintf;
-use function str_ends_with;
-use function str_replace;
-use function trim;
+use League\Csv\Writer as LeagueCsvWriter;
 
 final class CsvWriter
 {
@@ -35,7 +21,7 @@ final class CsvWriter
         private readonly string $escape = '\\',
     ) {
         if (!\class_exists(LeagueCsvWriter::class) || !\class_exists(CannotInsertRecord::class)) {
-            throw new RuntimeException("CSV writing requires league/csv. Install it with: composer require league/csv");
+            throw new \RuntimeException('CSV writing requires league/csv. Install it with: composer require league/csv');
         }
 
         $this->file = $this->filename;
@@ -52,12 +38,12 @@ final class CsvWriter
 
     public function write(array $row): void
     {
-        if ($this->headers === null) {
+        if (null === $this->headers) {
             $this->initializeHeaders($row);
         }
 
         // If row is already indexed (0-based), use it as-is
-        if (array_keys($row) === range(0, count($row) - 1)) {
+        if (\array_keys($row) === range(0, count($row) - 1)) {
             $orderedRow = $row;
         } else {
             // Associative array - order according to headers
@@ -65,7 +51,7 @@ final class CsvWriter
             foreach ($this->headers as $header) {
                 // Try exact match first, then case-insensitive match
                 $value = $row[$header] ?? null;
-                if ($value === null) {
+                if (null === $value) {
                     // Case-insensitive lookup for normalized headers
                     foreach ($row as $key => $val) {
                         if (strtolower($key) === strtolower($header)) {
@@ -81,30 +67,26 @@ final class CsvWriter
         try {
             $this->csv->insertOne($orderedRow);
         } catch (CannotInsertRecord $e) {
-            throw new RuntimeException(sprintf(
-                'Failed writing CSV record to "%s": %s',
-                $this->filename,
-                $e->getMessage()
-            ), 0, $e);
+            throw new \RuntimeException(\sprintf('Failed writing CSV record to "%s": %s', $this->filename, $e->getMessage()), 0, $e);
         }
     }
 
     public function writeHeadersFromSourceFile(string $sourceFile): void
     {
-        if (!is_file($sourceFile)) {
-            throw new RuntimeException(sprintf('Source file "%s" does not exist.', $sourceFile));
+        if (!\is_file($sourceFile)) {
+            throw new \RuntimeException(\sprintf('Source file "%s" does not exist.', $sourceFile));
         }
 
-        $handle = fopen($sourceFile, 'r');
-        if ($handle === false) {
-            throw new RuntimeException(sprintf('Failed to open source file "%s".', $sourceFile));
+        $handle = \fopen($sourceFile, 'r');
+        if (false === $handle) {
+            throw new \RuntimeException(\sprintf('Failed to open source file "%s".', $sourceFile));
         }
 
-        $headers = fgetcsv($handle, 0, $this->delimiter, '"', '\\');
-        fclose($handle);
+        $headers = \fgetcsv($handle, 0, $this->delimiter, '"', '\\');
+        \fclose($handle);
 
-        if ($headers === false) {
-            throw new RuntimeException(sprintf('Failed to read headers from source file "%s".', $sourceFile));
+        if (false === $headers) {
+            throw new \RuntimeException(\sprintf('Failed to read headers from source file "%s".', $sourceFile));
         }
 
         $headers = array_map('trim', $headers);
@@ -114,11 +96,7 @@ final class CsvWriter
         try {
             $this->csv->insertOne($this->headers);
         } catch (CannotInsertRecord $e) {
-            throw new RuntimeException(sprintf(
-                'Failed writing CSV headers to "%s": %s',
-                $this->filename,
-                $e->getMessage()
-            ), 0, $e);
+            throw new \RuntimeException(\sprintf('Failed writing CSV headers to "%s": %s', $this->filename, $e->getMessage()), 0, $e);
         }
     }
 
@@ -130,11 +108,7 @@ final class CsvWriter
         try {
             $this->csv->insertOne($this->headers);
         } catch (CannotInsertRecord $e) {
-            throw new RuntimeException(sprintf(
-                'Failed writing CSV headers to "%s": %s',
-                $this->filename,
-                $e->getMessage()
-            ), 0, $e);
+            throw new \RuntimeException(\sprintf('Failed writing CSV headers to "%s": %s', $this->filename, $e->getMessage()), 0, $e);
         }
     }
 
@@ -155,17 +129,13 @@ final class CsvWriter
 
     private function initializeHeaders(array $row): void
     {
-        $this->headers = array_keys($row);
+        $this->headers = \array_keys($row);
         $this->originalHeaders = $this->headers;
 
         try {
             $this->csv->insertOne($this->headers);
         } catch (CannotInsertRecord $e) {
-            throw new RuntimeException(sprintf(
-                'Failed writing CSV headers to "%s": %s',
-                $this->filename,
-                $e->getMessage()
-            ), 0, $e);
+            throw new \RuntimeException(\sprintf('Failed writing CSV headers to "%s": %s', $this->filename, $e->getMessage()), 0, $e);
         }
     }
 }

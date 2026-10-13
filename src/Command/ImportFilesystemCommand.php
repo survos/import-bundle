@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
@@ -7,9 +8,6 @@ use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Style\SymfonyStyle;
-
-use function in_array;
-use function sprintf;
 
 #[AsCommand('import:filesystem', 'Deprecated compatibility wrapper; use import:dir for directory-aware filesystem scans')]
 final class ImportFilesystemCommand
@@ -49,7 +47,7 @@ final class ImportFilesystemCommand
         $io->warning('`import:filesystem` is deprecated and now delegates to `import:dir`.');
         $io->note('Use `import:dir` directly when you need directory rows and stable DIR/FILE DTO output.');
 
-        if ($tree === false) {
+        if (false === $tree) {
             $io->warning('`--tree=0` is ignored. `import:dir` always emits directory rows because downstream imports need them.');
         }
 
@@ -59,8 +57,8 @@ final class ImportFilesystemCommand
             default => null,
         };
 
-        if (!in_array($progressMode, ['buckets', 'indeterminate', 'none'], true)) {
-            $io->warning(sprintf(
+        if (!\in_array($progressMode, ['buckets', 'indeterminate', 'none'], true)) {
+            $io->warning(\sprintf(
                 'Unknown progress mode "%s"; delegating with import:dir default progress behavior.',
                 $progressMode
             ));

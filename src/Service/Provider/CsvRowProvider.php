@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
@@ -11,22 +12,20 @@ final class CsvRowProvider implements RowProviderInterface
 {
     public function supports(string $ext): bool
     {
-        return $ext === 'csv';
+        return 'csv' === $ext;
     }
 
     public function iterate(string $path, ProviderContext $ctx): \Generator
     {
         if (!class_exists(CsvReader::class)) {
-            throw new \RuntimeException(
-                'CSV support requires league/csv. Install it with: composer require league/csv'
-            );
+            throw new \RuntimeException('CSV support requires league/csv. Install it with: composer require league/csv');
         }
 
         $firstChunk = \file_get_contents($path, false, null, 0, 4096) ?: '';
-        $delimiter  = \str_contains($firstChunk, "\t") ? "\t" : ',';
+        $delimiter = \str_contains($firstChunk, "\t") ? "\t" : ',';
 
         if ($ctx->io) {
-            $ctx->io->note(sprintf('Detected CSV delimiter: %s', $delimiter === "\t" ? '\\t (TAB)' : '"," (comma)'));
+            $ctx->io->note(sprintf('Detected CSV delimiter: %s', "\t" === $delimiter ? '\\t (TAB)' : '"," (comma)'));
         }
 
         $csv = CsvReader::from($path, 'r');
@@ -43,7 +42,6 @@ final class CsvRowProvider implements RowProviderInterface
             if ($ctx->onHeader) {
                 ($ctx->onHeader)($normalized, (string) $name);
             }
-
         }
 
         foreach ($csv->getRecords() as $record) {
@@ -64,13 +62,13 @@ final class CsvRowProvider implements RowProviderInterface
 
     private function normalizeHeaderName(string $name): string
     {
-        $name  = \trim($name);
+        $name = \trim($name);
         $parts = \preg_split('/[^A-Za-z0-9]+/', $name, -1, \PREG_SPLIT_NO_EMPTY) ?: [];
-        if ($parts === []) {
+        if ([] === $parts) {
             return 'field';
         }
 
-        $parts = \array_map(static fn($p) => \strtolower($p), $parts);
+        $parts = \array_map(static fn ($p) => \strtolower($p), $parts);
 
         $camel = \array_shift($parts);
         foreach ($parts as $p) {
@@ -78,7 +76,7 @@ final class CsvRowProvider implements RowProviderInterface
         }
 
         if (!\preg_match('/^[A-Za-z_]/', $camel)) {
-            $camel = '_' . $camel;
+            $camel = '_'.$camel;
         }
 
         return $camel;

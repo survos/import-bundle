@@ -4,10 +4,6 @@ declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
-use ReflectionAttribute;
-use ReflectionClass;
-use ReflectionNamedType;
-use ReflectionProperty;
 use Survos\FieldBundle\Attribute\Map as MapAttr;
 
 /**
@@ -28,17 +24,19 @@ final class DtoMapper
 {
     /**
      * @template T of object
-     * @param array<string,mixed> $record
-     * @param class-string<T>     $dtoClass
+     *
+     * @param array<string,mixed>  $record
+     * @param class-string<T>      $dtoClass
      * @param array{pixie?:string} $context
+     *
      * @return T
      */
     public function mapRecord(array $record, string $dtoClass, array $context = []): object
     {
-        $rc  = new ReflectionClass($dtoClass);
+        $rc = new \ReflectionClass($dtoClass);
         $dto = $rc->newInstanceWithoutConstructor();
 
-        foreach ($rc->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
+        foreach ($rc->getProperties(\ReflectionProperty::IS_PUBLIC) as $prop) {
             // A get-only hooked property (e.g. DcObj::$type, computed from genre/typeOfResource)
             // has no backing value; assigning it throws "is read-only". It derives itself.
             if ($prop->isVirtual()) {
@@ -46,7 +44,7 @@ final class DtoMapper
             }
             $value = $this->resolveValue($prop, $record, $context);
             $value = $this->coerceToPropertyType($prop, $value);
-            if ($value !== null || $this->isNullable($prop)) {
+            if (null !== $value || $this->isNullable($prop)) {
                 $prop->setValue($dto, $value);
             }
         }
@@ -64,12 +62,13 @@ final class DtoMapper
     public function toArray(object $dto): array
     {
         $out = [];
-        $rc  = new ReflectionClass($dto);
-        foreach ($rc->getProperties(ReflectionProperty::IS_PUBLIC) as $p) {
+        $rc = new \ReflectionClass($dto);
+        foreach ($rc->getProperties(\ReflectionProperty::IS_PUBLIC) as $p) {
             if ($p->isInitialized($dto)) {
                 $out[$p->getName()] = $p->getValue($dto);
             }
         }
+
         return $out;
     }
 
@@ -81,14 +80,15 @@ final class DtoMapper
      * source-DTO analogue of BaseItemDto dropping consumed aliases from its extras.
      *
      * @param class-string $dtoClass
+     *
      * @return list<string>
      */
     public function aliasSourceKeys(string $dtoClass): array
     {
         $keys = [];
-        foreach ((new ReflectionClass($dtoClass))->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
+        foreach ((new \ReflectionClass($dtoClass))->getProperties(\ReflectionProperty::IS_PUBLIC) as $prop) {
             $map = $this->getAttribute($prop, MapAttr::class);
-            if ($map === null) {
+            if (null === $map) {
                 continue;
             }
             foreach ($map->sources() as $src) {
@@ -103,7 +103,7 @@ final class DtoMapper
 
     private function applyArray(object $dto, array $data): void
     {
-        $rc = new ReflectionClass($dto);
+        $rc = new \ReflectionClass($dto);
         foreach ($data as $k => $v) {
             if ($rc->hasProperty($k)) {
                 $p = $rc->getProperty($k);
@@ -114,7 +114,7 @@ final class DtoMapper
         }
     }
 
-    private function resolveValue(ReflectionProperty $prop, array $record, array $context): mixed
+    private function resolveValue(\ReflectionProperty $prop, array $record, array $context): mixed
     {
         $map = $this->getAttribute($prop, MapAttr::class);
 
@@ -135,27 +135,27 @@ final class DtoMapper
             // Multi-source aliases: first source key present with a non-null value wins.
             $resolved = false;
             foreach ($map->sources() as $sourceKey) {
-                if (array_key_exists($sourceKey, $record) && $record[$sourceKey] !== null) {
+                if (array_key_exists($sourceKey, $record) && null !== $record[$sourceKey]) {
                     $val = $record[$sourceKey];
                     $resolved = true;
                     break;
                 }
             }
             if (!$resolved) {
-                if ($map->regex !== null) {
+                if (null !== $map->regex) {
                     $val = $this->findByRegex($record, $map->regex);
                 } elseif (array_key_exists($prop->getName(), $record)) {
                     $val = $record[$prop->getName()];
                 }
             }
 
-            if ($map->if === 'isset' && $val === null) {
+            if ('isset' === $map->if && null === $val) {
                 return null;
             }
 
             if (is_string($val) && $map->delim && $this->isArrayProperty($prop)) {
-                $parts = preg_split('/\s*' . preg_quote($map->delim, '/') . '\s*/', $val) ?: [];
-                $val   = array_values(array_filter(array_map('trim', $parts), static fn($s) => $s !== ''));
+                $parts = preg_split('/\s*'.preg_quote($map->delim, '/').'\s*/', $val) ?: [];
+                $val = array_values(array_filter(array_map('trim', $parts), static fn ($s) => '' !== $s));
             }
         } else {
             // No #[Map] — fall back to matching by property name
@@ -169,51 +169,55 @@ final class DtoMapper
 
     private function findByRegex(array $record, string $regex): mixed
     {
-        $pattern = str_starts_with($regex, '/') ? $regex : '/' . $regex . '/i';
+        $pattern = str_starts_with($regex, '/') ? $regex : '/'.$regex.'/i';
         foreach ($record as $k => $v) {
             if (@preg_match($pattern, (string) $k)) {
                 return $v;
             }
         }
+
         return null;
     }
 
-    private function isArrayProperty(ReflectionProperty $prop): bool
+    private function isArrayProperty(\ReflectionProperty $prop): bool
     {
         $t = $prop->getType();
-        return $t instanceof ReflectionNamedType && $t->getName() === 'array';
+
+        return $t instanceof \ReflectionNamedType && 'array' === $t->getName();
     }
 
-    private function isNullable(ReflectionProperty $prop): bool
+    private function isNullable(\ReflectionProperty $prop): bool
     {
         $t = $prop->getType();
-        return $t instanceof ReflectionNamedType && $t->allowsNull();
+
+        return $t instanceof \ReflectionNamedType && $t->allowsNull();
     }
 
-    private function coerceToPropertyType(ReflectionProperty $prop, mixed $value): mixed
+    private function coerceToPropertyType(\ReflectionProperty $prop, mixed $value): mixed
     {
-        if ($value === null) {
+        if (null === $value) {
             return null;
         }
         $t = $prop->getType();
-        if (!$t instanceof ReflectionNamedType) {
+        if (!$t instanceof \ReflectionNamedType) {
             return $value;
         }
 
         return match ($t->getName()) {
             'string' => is_string($value) ? $value : (is_scalar($value) ? (string) $value : json_encode($value, JSON_UNESCAPED_UNICODE)),
-            'int'    => is_int($value) ? $value : (is_numeric($value) ? (int) $value : null),
-            'float'  => is_float($value) ? $value : (is_numeric($value) ? (float) $value : null),
-            'bool'   => is_bool($value) ? $value : filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
-            'array'  => is_array($value) ? $value : (is_string($value) ? [$value] : (array) $value),
-            default  => $value,
+            'int' => is_int($value) ? $value : (is_numeric($value) ? (int) $value : null),
+            'float' => is_float($value) ? $value : (is_numeric($value) ? (float) $value : null),
+            'bool' => is_bool($value) ? $value : filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
+            'array' => is_array($value) ? $value : (is_string($value) ? [$value] : (array) $value),
+            default => $value,
         };
     }
 
     /** @template T of object */
-    private function getAttribute(ReflectionProperty $prop, string $attributeClass): ?object
+    private function getAttribute(\ReflectionProperty $prop, string $attributeClass): ?object
     {
-        $attrs = $prop->getAttributes($attributeClass, ReflectionAttribute::IS_INSTANCEOF);
+        $attrs = $prop->getAttributes($attributeClass, \ReflectionAttribute::IS_INSTANCEOF);
+
         return $attrs ? $attrs[0]->newInstance() : null;
     }
 }

@@ -1,10 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
 use Doctrine\Persistence\ManagerRegistry;
-use RuntimeException;
 
 final class EntityClassResolver
 {
@@ -37,7 +37,7 @@ final class EntityClassResolver
             foreach ($metadata as $meta) {
                 $class = $meta->getName();
 
-                if (\str_ends_with($class, '\\' . $short)) {
+                if (\str_ends_with($class, '\\'.$short)) {
                     return $class;
                 }
 
@@ -47,9 +47,6 @@ final class EntityClassResolver
             }
         }
 
-        throw new RuntimeException(sprintf(
-            'Cannot resolve entity class for "%s". Try using the full FQCN.',
-            $name
-        ));
+        throw new \RuntimeException(sprintf('Cannot resolve entity class for "%s". Try using the full FQCN.', $name));
     }
 }

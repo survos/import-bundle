@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
@@ -11,7 +12,7 @@ final class JsonlRowProvider implements RowProviderInterface
 {
     public function supports(string $ext): bool
     {
-        return $ext === 'jsonl';
+        return 'jsonl' === $ext;
     }
 
     public function iterate(string $path, ProviderContext $ctx): \Generator

@@ -1,9 +1,9 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service\Provider;
 
-use LogicException;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
 final class RowProviderRegistry
@@ -28,6 +28,6 @@ final class RowProviderRegistry
             }
         }
 
-        throw new LogicException(sprintf('No row provider supports extension "%s" for "%s".', $ext, $path));
+        throw new \LogicException(sprintf('No row provider supports extension "%s" for "%s".', $ext, $path));
     }
 }

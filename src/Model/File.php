@@ -1,12 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Model;
 
 use Survos\ImportBundle\Contract\HasFileInfoInterface;
-
-use function is_array;
-use function is_string;
 
 final class File implements HasFileInfoInterface
 {
@@ -53,16 +51,16 @@ final class File implements HasFileInfoInterface
     public static function fromArray(array $data): self
     {
         $dto = new self(
-            id: is_string($data['id'] ?? null) ? $data['id'] : '',
-            parentId: is_string($data['parent_id'] ?? null) ? $data['parent_id'] : '',
-            rootId: is_string($data['root_id'] ?? null) ? $data['root_id'] : '',
-            relativePath: is_string($data['relative_path'] ?? null) ? $data['relative_path'] : '',
+            id: \is_string($data['id'] ?? null) ? $data['id'] : '',
+            parentId: \is_string($data['parent_id'] ?? null) ? $data['parent_id'] : '',
+            rootId: \is_string($data['root_id'] ?? null) ? $data['root_id'] : '',
+            relativePath: \is_string($data['relative_path'] ?? null) ? $data['relative_path'] : '',
             probeLevel: (int) ($data['probe_level'] ?? 0),
-            fileInfo: FinderFileInfo::fromArray(is_array($data['file_info'] ?? null) ? $data['file_info'] : []),
+            fileInfo: FinderFileInfo::fromArray(\is_array($data['file_info'] ?? null) ? $data['file_info'] : []),
         );
 
-        $dto->tags = is_array($data['tags'] ?? null) ? $data['tags'] : [];
-        $dto->metadata = is_array($data['metadata'] ?? null) ? $data['metadata'] : [];
+        $dto->tags = \is_array($data['tags'] ?? null) ? $data['tags'] : [];
+        $dto->metadata = \is_array($data['metadata'] ?? null) ? $data['metadata'] : [];
 
         return $dto;
     }

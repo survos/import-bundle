@@ -24,17 +24,18 @@ final class DtoMapRecordListener
     public function __construct(
         private readonly DtoClassResolver $resolver,
         private readonly DtoMapper $mapper,
-    ) {}
+    ) {
+    }
 
     #[AsEventListener(event: ImportConvertRowEvent::class, priority: -100)]
     public function mapRecord(ImportConvertRowEvent $event): void
     {
-        if ($event->row === null || $event->dataset === '') {
+        if (null === $event->row || '' === $event->dataset) {
             return;
         }
 
         $dtoClass = $this->resolver->resolve($event->dataset);
-        if ($dtoClass === null) {
+        if (null === $dtoClass) {
             return;
         }
 
@@ -44,13 +45,13 @@ final class DtoMapRecordListener
                 : $event->dataset,
         ];
 
-        $dto    = $this->mapper->mapRecord($event->row, $dtoClass, $context);
+        $dto = $this->mapper->mapRecord($event->row, $dtoClass, $context);
         $mapped = $this->mapper->toArray($dto);
 
         // Merge: DTO output wins over raw, but raw keys not in the DTO survive
         $event->row = array_filter(
             [...$event->row, ...$mapped],
-            static fn(mixed $v): bool => $v !== null && $v !== '' && $v !== [],
+            static fn (mixed $v): bool => null !== $v && '' !== $v && [] !== $v,
         );
     }
 }

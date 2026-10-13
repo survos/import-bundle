@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
@@ -9,15 +10,6 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use RuntimeException;
-
-use function basename;
-use function dirname;
-use function is_string;
-use function preg_replace;
-use function sprintf;
-use function str_ends_with;
-use function substr;
 
 #[AsCommand('import:export:csv', 'Export a JSONL file to CSV using profile-derived headers')]
 final class ImportExportCsvCommand
@@ -40,11 +32,12 @@ final class ImportExportCsvCommand
     ): int {
         $io->title('Export CSV');
 
-        $limit = ($limit !== null && $limit <= 0) ? null : $limit;
+        $limit = (null !== $limit && $limit <= 0) ? null : $limit;
 
         $profilePath = $this->resolveProfilePath($profile, $input);
-        if ($profilePath === null || $profilePath === '') {
+        if (null === $profilePath || '' === $profilePath) {
             $io->error('Missing profile. Provide --profile or an input path to infer it.');
+
             return Command::FAILURE;
         }
 
@@ -55,12 +48,13 @@ final class ImportExportCsvCommand
                 $output,
                 $limit
             );
-        } catch (RuntimeException $e) {
+        } catch (\RuntimeException $e) {
             $io->error($e->getMessage());
+
             return Command::FAILURE;
         }
 
-        $io->success(sprintf(
+        $io->success(\sprintf(
             'Exported %d records to %s',
             $result['recordCount'],
             $result['outputPath']
@@ -71,11 +65,11 @@ final class ImportExportCsvCommand
 
     private function resolveProfilePath(?string $profile, ?string $input): ?string
     {
-        if (is_string($profile) && $profile !== '') {
+        if (\is_string($profile) && '' !== $profile) {
             return $profile;
         }
 
-        if (is_string($input) && $input !== '') {
+        if (\is_string($input) && '' !== $input) {
             return $this->profilePathFromInput($input);
         }
 
@@ -84,16 +78,16 @@ final class ImportExportCsvCommand
 
     private function profilePathFromInput(string $inputPath): string
     {
-        $dir = dirname($inputPath);
-        $filename = basename($inputPath);
+        $dir = \dirname($inputPath);
+        $filename = \basename($inputPath);
 
-        if (str_ends_with($filename, '.gz')) {
-            $filename = substr($filename, 0, -3);
+        if (\str_ends_with($filename, '.gz')) {
+            $filename = \substr($filename, 0, -3);
         }
 
-        $trimmed = preg_replace('/\.(jsonl|json|csv)$/i', '', $filename, 1);
+        $trimmed = \preg_replace('/\.(jsonl|json|csv)$/i', '', $filename, 1);
         $trimmed = $trimmed ?? $filename;
 
-        return sprintf('%s/%s.profile.json', $dir, $trimmed);
+        return \sprintf('%s/%s.profile.json', $dir, $trimmed);
     }
 }

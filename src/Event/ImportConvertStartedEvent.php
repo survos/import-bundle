@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Event;
@@ -19,14 +20,7 @@ namespace Survos\ImportBundle\Event;
 final class ImportConvertStartedEvent
 {
     /**
-     * @param string   $input
-     * @param string   $jsonlPath
-     * @param string   $profilePath
-     * @param string  $dataset
      * @param string[] $tags
-     * @param ?int     $limit
-     * @param ?string  $zipPath
-     * @param ?string  $rootKey
      */
     public function __construct(
         public readonly string $input,

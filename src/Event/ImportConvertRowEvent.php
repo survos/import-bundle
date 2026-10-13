@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Event;
@@ -9,17 +10,17 @@ final class ImportConvertRowEvent
 
     /**
      * @param array<string,mixed>|null $row
-     * @param string[]                $tags
+     * @param string[]                 $tags
      */
     public function __construct(
-        public ?array  $row,
-        public string  $input,
-        public string  $format,
-        public int     $index,
+        public ?array $row,
+        public string $input,
+        public string $format,
+        public int $index,
         public string $dataset,
-        public array   $tags = [],
+        public array $tags = [],
         public ?string $status = self::STATUS_OKAY,
-        public string  $stage = 'normalize',
+        public string $stage = 'normalize',
 
         /**
          * Optional profile file to drive transforms on pass 2 (e.g. split lists).

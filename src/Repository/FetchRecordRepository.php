@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Repository;
@@ -40,7 +41,7 @@ class FetchRecordRepository extends ServiceEntityRepository
             ->orderBy('p.pageNumber', 'ASC')
             ->addOrderBy('r.rowNumber', 'ASC');
 
-        if ($recordType !== null) {
+        if (null !== $recordType) {
             $qb
                 ->andWhere('r.recordType = :recordType')
                 ->setParameter('recordType', $recordType);

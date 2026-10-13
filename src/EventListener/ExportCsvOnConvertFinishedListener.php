@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\EventListener;
@@ -6,9 +7,6 @@ namespace Survos\ImportBundle\EventListener;
 use Survos\ImportBundle\Event\ImportConvertFinishedEvent;
 use Survos\ImportBundle\Service\CsvProfileExporter;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
-
-use function in_array;
-use function str_ends_with;
 
 final class ExportCsvOnConvertFinishedListener
 {
@@ -25,7 +23,7 @@ final class ExportCsvOnConvertFinishedListener
         }
 
         $inputPath = $this->resolveJsonlPath($event);
-        if ($inputPath === null) {
+        if (null === $inputPath) {
             return;
         }
 
@@ -43,7 +41,7 @@ final class ExportCsvOnConvertFinishedListener
             return false;
         }
 
-        return in_array('export:csv', $event->tags, true) || in_array('export.csv', $event->tags, true);
+        return \in_array('export:csv', $event->tags, true) || \in_array('export.csv', $event->tags, true);
     }
 
     private function resolveJsonlPath(ImportConvertFinishedEvent $event): ?string
@@ -61,11 +59,11 @@ final class ExportCsvOnConvertFinishedListener
 
     private function isJsonlPath(string $path): bool
     {
-        return str_ends_with($path, '.jsonl') || str_ends_with($path, '.jsonl.gz');
+        return \str_ends_with($path, '.jsonl') || \str_ends_with($path, '.jsonl.gz');
     }
 
     private function isCsvPath(string $path): bool
     {
-        return str_ends_with($path, '.csv') || str_ends_with($path, '.csv.gz');
+        return \str_ends_with($path, '.csv') || \str_ends_with($path, '.csv.gz');
     }
 }

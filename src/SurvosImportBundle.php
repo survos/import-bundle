@@ -1,15 +1,12 @@
 <?php
+
 declare(strict_types=1);
 /** generated from /home/tac/g/sites/survos/vendor/survos/maker-bundle/templates/skeleton/bundle/src/Bundle.tpl.php */
 
 namespace Survos\ImportBundle;
 
-use Survos\ImportBundle\Command\ImportBrowseCommand;
-use Survos\ImportBundle\Service\ImportConverter;
-use Survos\ImportBundle\Command\ImportDirCommand;
 use Survos\ImportBundle\Command\ImportEntitiesCommand;
 use Survos\ImportBundle\Command\ImportExportCsvCommand;
-use Survos\ImportBundle\Command\ImportFilesystemCommand;
 use Survos\ImportBundle\Command\ImportProfileReportCommand;
 use Survos\ImportBundle\Compiler\FetchAwareEntityPass;
 use Survos\ImportBundle\EventListener\DtoMapRecordListener;
@@ -20,26 +17,26 @@ use Survos\ImportBundle\EventListener\SampleImportDirEnrichmentListener;
 use Survos\ImportBundle\MessageHandler\FetchPageMessageHandler;
 use Survos\ImportBundle\Repository\FetchPageRepository;
 use Survos\ImportBundle\Repository\FetchRecordRepository;
-use Survos\ImportBundle\Service\DtoClassResolver;
-use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\CsvProfileExporter;
+use Survos\ImportBundle\Service\DtoClassResolver;
 use Survos\ImportBundle\Service\DtoMapper;
+use Survos\ImportBundle\Service\EntityClassResolver;
 use Survos\ImportBundle\Service\FetchAwareEntityRegistry;
 use Survos\ImportBundle\Service\FetchRecordExporter;
+use Survos\ImportBundle\Service\ImportConverter;
 use Survos\ImportBundle\Service\LooseObjectMapper;
 use Survos\ImportBundle\Service\ProbeService;
 use Survos\ImportBundle\Service\Provider\RowProviderInterface;
 use Survos\ImportBundle\Service\Provider\RowProviderRegistry;
 use Survos\ImportBundle\Service\RowNormalizer;
+use Survos\Kit\AbstractSurvosBundle;
+use Survos\Kit\SurvosKitBundle;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Kernel\RequiredBundle;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\DependencyInjection\Reference;
-use Survos\Kit\AbstractSurvosBundle;
-use Survos\Kit\SurvosKitBundle;
-
 
 #[RequiredBundle(\Survos\DimensionsBundle\SurvosDimensionsBundle::class, ignoreOnInvalid: true)]
 #[RequiredBundle(SurvosKitBundle::class)]
@@ -56,7 +53,7 @@ class SurvosImportBundle extends AbstractSurvosBundle
                         'SurvosImportBundle' => [
                             'is_bundle' => false,
                             'type' => 'attribute',
-                            'dir' => \dirname(__DIR__) . '/src/Entity',
+                            'dir' => \dirname(__DIR__).'/src/Entity',
                             'prefix' => 'Survos\\ImportBundle\\Entity',
                             'alias' => 'Import',
                         ],
@@ -73,7 +70,7 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $builder->autowire(RowProviderRegistry::class)
             ->setPublic(true)
             ->setAutoconfigured(true)
-            ;
+        ;
 
         $builder->autowire(RowNormalizer::class)
             ->setPublic(true)
@@ -83,12 +80,11 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $builder->registerForAutoconfiguration(RowProviderInterface::class)
             ->addTag('survos.import.row_provider');
 
-        $builder->autowire(\Survos\ImportBundle\Service\Provider\CsvRowProvider::class)->setAutoconfigured(true);
-        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonRowProvider::class)->setAutoconfigured(true);
-        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonlRowProvider::class)->setAutoconfigured(true);
-        $builder->autowire(\Survos\ImportBundle\Service\Provider\JsonDirRowProvider::class)->setAutoconfigured(true);
-        $builder->autowire(\Survos\ImportBundle\Service\Provider\XlsxRowProvider::class)->setAutoconfigured(true);
-
+        $builder->autowire(Service\Provider\CsvRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(Service\Provider\JsonRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(Service\Provider\JsonlRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(Service\Provider\JsonDirRowProvider::class)->setAutoconfigured(true);
+        $builder->autowire(Service\Provider\XlsxRowProvider::class)->setAutoconfigured(true);
 
         $builder->registerForAutoconfiguration(RowProviderInterface::class)
             ->addTag('survos.import.row_provider');
@@ -97,12 +93,12 @@ class SurvosImportBundle extends AbstractSurvosBundle
             ->setPublic(true)
             ->setAutoconfigured(true);
 
-            $builder->autowire(ImportEntitiesCommand::class)
-                ->setPublic(true)
-                ->setAutoconfigured(true)
-                ->setArgument('$dataDir', $config['dir'])
-                ->addTag('console.command');
-            // @todo: inject each service properly
+        $builder->autowire(ImportEntitiesCommand::class)
+            ->setPublic(true)
+            ->setAutoconfigured(true)
+            ->setArgument('$dataDir', $config['dir'])
+            ->addTag('console.command');
+        // @todo: inject each service properly
 
         // The converter is both an injectable service and the import:convert command.
         $builder->autowire(ImportConverter::class)
@@ -118,9 +114,6 @@ class SurvosImportBundle extends AbstractSurvosBundle
             ->setPublic(true)
             ->setAutoconfigured(true)
             ->addTag('console.command');
-
-
-
 
         $builder->autowire(ProbeService::class)
             ->setPublic(true)
@@ -191,7 +184,6 @@ class SurvosImportBundle extends AbstractSurvosBundle
                 '$dimensionsNormalizer',
                 new Reference(\Survos\DimensionsBundle\Service\DimensionsNormalizer::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
             );
-
     }
 
     public function configure(DefinitionConfigurator $definition): void
@@ -218,5 +210,4 @@ class SurvosImportBundle extends AbstractSurvosBundle
         parent::build($container);
         $container->addCompilerPass(new FetchAwareEntityPass());
     }
-
 }

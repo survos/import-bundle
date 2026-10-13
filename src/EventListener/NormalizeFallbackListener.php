@@ -25,7 +25,7 @@ final class NormalizeFallbackListener
 
     public function __invoke(ImportConvertRowEvent $event): void
     {
-        if ($event->row === null || $event->stage !== 'normalize') {
+        if (null === $event->row || 'normalize' !== $event->stage) {
             return;
         }
 
@@ -49,12 +49,12 @@ final class NormalizeFallbackListener
     /** @param array<string,mixed> $row */
     private function normalizeDimensions(array &$row): void
     {
-        if ($this->dimensionsNormalizer === null) {
+        if (null === $this->dimensionsNormalizer) {
             return;
         }
 
         $source = $row[MuseumVocab::DIMENSIONS] ?? null;
-        if ($source === null) {
+        if (null === $source) {
             return;
         }
 
@@ -65,10 +65,10 @@ final class NormalizeFallbackListener
 
         $result = $this->dimensionsNormalizer->normalize($source);
         $row[MuseumVocab::DIMENSIONS] = $result['dimensions'];
-        if ($result['dimensionsRaw'] !== null) {
+        if (null !== $result['dimensionsRaw']) {
             $row['dimensionsRaw'] = $result['dimensionsRaw'];
         }
-        if ($result['weight'] !== null && !isset($row['weight'])) {
+        if (null !== $result['weight'] && !isset($row['weight'])) {
             $row['weight'] = $result['weight'];
         }
     }
@@ -85,8 +85,10 @@ final class NormalizeFallbackListener
                     return true;
                 }
             }
+
             return false;
         }
+
         return false;
     }
 }

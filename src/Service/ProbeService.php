@@ -1,43 +1,13 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
 
-use DOMDocument;
-use DOMXPath;
 use Survos\ImportBundle\Event\ImportDirFileEvent;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
-use ZipArchive;
 
-use function count;
-use function escapeshellarg;
-use function explode;
-use function file_get_contents;
-use function fclose;
-use function finfo_close;
-use function finfo_file;
-use function finfo_open;
-use function fopen;
-use function function_exists;
 use function hash;
-use function hash_algos;
-use function hash_final;
-use function hash_init;
-use function hash_update_stream;
-use function implode;
-use function in_array;
-use function is_array;
-use function is_file;
-use function is_numeric;
-use function is_resource;
-use function is_string;
-use function json_decode;
-use function microtime;
-use function min;
-use function shell_exec;
-use function sprintf;
-use function str_starts_with;
-use function trim;
 
 final class ProbeService
 {
@@ -57,7 +27,7 @@ final class ProbeService
     public function onImportDirFile(ImportDirFileEvent $event): void
     {
         $file = $event->file;
-        $start = microtime(true);
+        $start = \microtime(true);
 
         $isReadable = $file->fileInfo->isReadable;
         $path = $file->fileInfo->pathname;
@@ -73,14 +43,14 @@ final class ProbeService
 
             if ($isReadable) {
                 $mimeType = $this->detectMimeType($path);
-                if ($mimeType !== null) {
+                if (null !== $mimeType) {
                     $file->metadata['mime_type'] = $mimeType;
                 }
             }
 
-            if ($isReadable && in_array('xxh3', hash_algos(), true)) {
+            if ($isReadable && \in_array('xxh3', \hash_algos(), true)) {
                 $checksum = $this->computeXxh3Checksum($path);
-                if ($checksum !== null) {
+                if (null !== $checksum) {
                     $file->metadata['checksum_xxh3'] = $checksum;
 
                     if (isset($this->seenChecksums[$checksum])) {
@@ -92,23 +62,23 @@ final class ProbeService
             }
 
             $sidecar = $this->loadSidecarData($path);
-            if ($sidecar !== null) {
+            if (null !== $sidecar) {
                 $file->metadata['sidecar'] = $sidecar;
             }
         }
 
         if ($event->probeLevel >= 2 && $isReadable) {
-            $file->metadata = [...$file->metadata, ...$this->probeDeep($path, $extension !== '' ? $extension : null, $mimeType)];
+            $file->metadata = [...$file->metadata, ...$this->probeDeep($path, '' !== $extension ? $extension : null, $mimeType)];
         }
 
         if (
             $event->probeLevel >= 3
             && $isReadable
-            && $this->shouldProbeMedia($extension !== '' ? $extension : null, $mimeType)
-            && $file->fileInfo->size !== null
+            && $this->shouldProbeMedia('' !== $extension ? $extension : null, $mimeType)
+            && null !== $file->fileInfo->size
         ) {
             $fingerprint = $this->probeAudioFingerprint($path);
-            if ($fingerprint !== null) {
+            if (null !== $fingerprint) {
                 $file->metadata = [...$file->metadata, ...$fingerprint['metadata']];
 
                 if (isset($this->audioFingerprints[$fingerprint['hash']])) {
@@ -131,23 +101,24 @@ final class ProbeService
             }
         }
 
-        $file->metadata['probe_duration_ms'] = (int) ((microtime(true) - $start) * 1000);
+        $file->metadata['probe_duration_ms'] = (int) ((\microtime(true) - $start) * 1000);
     }
 
     private function loadSidecarData(string $path): ?array
     {
-        $sidecarPath = $path . '.sidecar.json';
-        if (!is_file($sidecarPath)) {
+        $sidecarPath = $path.'.sidecar.json';
+        if (!\is_file($sidecarPath)) {
             return null;
         }
 
-        $json = file_get_contents($sidecarPath);
-        if (!is_string($json) || $json === '') {
+        $json = \file_get_contents($sidecarPath);
+        if (!\is_string($json) || '' === $json) {
             return null;
         }
 
-        $decoded = json_decode($json, true);
-        return is_array($decoded) ? $decoded : null;
+        $decoded = \json_decode($json, true);
+
+        return \is_array($decoded) ? $decoded : null;
     }
 
     /**
@@ -159,12 +130,12 @@ final class ProbeService
 
         if ($this->shouldProbeMedia($extension, $mimeType)) {
             $duration = $this->probeFfprobeDuration($filepath);
-            if ($duration !== null) {
+            if (null !== $duration) {
                 $metadata['media_duration'] = $duration;
             }
         }
 
-        if ($extension !== null && in_array($extension, ['docx'], true)) {
+        if (null !== $extension && \in_array($extension, ['docx'], true)) {
             $metadata = [...$metadata, ...$this->probeDocxMetadata($filepath)];
         }
 
@@ -173,35 +144,35 @@ final class ProbeService
 
     private function shouldProbeMedia(?string $extension, ?string $mimeType): bool
     {
-        if ($mimeType !== null && (str_starts_with($mimeType, 'audio/') || str_starts_with($mimeType, 'video/'))) {
+        if (null !== $mimeType && (\str_starts_with($mimeType, 'audio/') || \str_starts_with($mimeType, 'video/'))) {
             return true;
         }
 
-        if ($extension === null) {
+        if (null === $extension) {
             return false;
         }
 
-        return in_array($extension, ['mp3', 'wav', 'aac', 'flac', 'mp4', 'm4a', 'mov', 'mkv', 'webm'], true);
+        return \in_array($extension, ['mp3', 'wav', 'aac', 'flac', 'mp4', 'm4a', 'mov', 'mkv', 'webm'], true);
     }
 
     private function probeFfprobeDuration(string $filepath): ?float
     {
-        $which = shell_exec('command -v ffprobe 2>/dev/null');
-        if (!is_string($which) || trim($which) === '') {
+        $which = \shell_exec('command -v ffprobe 2>/dev/null');
+        if (!\is_string($which) || '' === \trim($which)) {
             return null;
         }
 
-        $command = sprintf(
+        $command = \sprintf(
             'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 %s 2>/dev/null',
-            escapeshellarg($filepath)
+            \escapeshellarg($filepath)
         );
-        $output = shell_exec($command);
-        if (!is_string($output)) {
+        $output = \shell_exec($command);
+        if (!\is_string($output)) {
             return null;
         }
 
-        $output = trim($output);
-        if ($output === '' || !is_numeric($output)) {
+        $output = \trim($output);
+        if ('' === $output || !\is_numeric($output)) {
             return null;
         }
 
@@ -214,55 +185,55 @@ final class ProbeService
     private function probeDocxMetadata(string $filepath): array
     {
         $metadata = [];
-        $zip = new ZipArchive();
-        if ($zip->open($filepath) !== true) {
+        $zip = new \ZipArchive();
+        if (true !== $zip->open($filepath)) {
             return $metadata;
         }
 
         $coreXml = $zip->getFromName('docProps/core.xml');
         $zip->close();
 
-        if ($coreXml === false) {
+        if (false === $coreXml) {
             return $metadata;
         }
 
-        $doc = new DOMDocument();
+        $doc = new \DOMDocument();
         if (!$doc->loadXML($coreXml)) {
             return $metadata;
         }
 
-        $xpath = new DOMXPath($doc);
+        $xpath = new \DOMXPath($doc);
         $xpath->registerNamespace('dc', 'http://purl.org/dc/elements/1.1/');
         $xpath->registerNamespace('dcterms', 'http://purl.org/dc/terms/');
         $xpath->registerNamespace('cp', 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties');
 
-        $author = trim($xpath->evaluate('string(//dc:creator)'));
-        if ($author !== '') {
+        $author = \trim($xpath->evaluate('string(//dc:creator)'));
+        if ('' !== $author) {
             $metadata['docx_author'] = $author;
         }
 
-        $title = trim($xpath->evaluate('string(//dc:title)'));
-        if ($title !== '') {
+        $title = \trim($xpath->evaluate('string(//dc:title)'));
+        if ('' !== $title) {
             $metadata['docx_title'] = $title;
         }
 
-        $subject = trim($xpath->evaluate('string(//dc:subject)'));
-        if ($subject !== '') {
+        $subject = \trim($xpath->evaluate('string(//dc:subject)'));
+        if ('' !== $subject) {
             $metadata['docx_subject'] = $subject;
         }
 
-        $keywords = trim($xpath->evaluate('string(//cp:keywords)'));
-        if ($keywords !== '') {
+        $keywords = \trim($xpath->evaluate('string(//cp:keywords)'));
+        if ('' !== $keywords) {
             $metadata['docx_keywords'] = $keywords;
         }
 
-        $created = trim($xpath->evaluate('string(//dcterms:created)'));
-        if ($created !== '') {
+        $created = \trim($xpath->evaluate('string(//dcterms:created)'));
+        if ('' !== $created) {
             $metadata['docx_created_time'] = $created;
         }
 
-        $modified = trim($xpath->evaluate('string(//dcterms:modified)'));
-        if ($modified !== '') {
+        $modified = \trim($xpath->evaluate('string(//dcterms:modified)'));
+        if ('' !== $modified) {
             $metadata['docx_modified_time'] = $modified;
         }
 
@@ -271,32 +242,34 @@ final class ProbeService
 
     private function detectMimeType(string $filepath): ?string
     {
-        if (!function_exists('finfo_open')) {
+        if (!\function_exists('finfo_open')) {
             return null;
         }
 
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        if ($finfo === false) {
+        $finfo = \finfo_open(FILEINFO_MIME_TYPE);
+        if (false === $finfo) {
             return null;
         }
 
         try {
             set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
-                error_log(sprintf('Warning: finfo_file error for %s: %s', $filepath, $errstr));
+                error_log(\sprintf('Warning: finfo_file error for %s: %s', $filepath, $errstr));
+
                 return true;
             });
-            $mimeType = finfo_file($finfo, $filepath);
+            $mimeType = \finfo_file($finfo, $filepath);
             restore_error_handler();
         } catch (\Throwable $e) {
             restore_error_handler();
-            finfo_close($finfo);
-            error_log(sprintf('Warning: finfo_file exception for %s: %s', $filepath, $e->getMessage()));
+            \finfo_close($finfo);
+            error_log(\sprintf('Warning: finfo_file exception for %s: %s', $filepath, $e->getMessage()));
+
             return null;
         }
 
-        finfo_close($finfo);
+        \finfo_close($finfo);
 
-        if (!is_string($mimeType) || trim($mimeType) === '') {
+        if (!\is_string($mimeType) || '' === \trim($mimeType)) {
             return null;
         }
 
@@ -306,35 +279,38 @@ final class ProbeService
     private function computeXxh3Checksum(string $filepath): ?string
     {
         try {
-            $hash = hash_init('xxh3');
+            $hash = \hash_init('xxh3');
 
             set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
-                error_log(sprintf('Warning: fopen error for %s: %s', $filepath, $errstr));
+                error_log(\sprintf('Warning: fopen error for %s: %s', $filepath, $errstr));
+
                 return true;
             });
-            $fh = fopen($filepath, 'rb');
+            $fh = \fopen($filepath, 'rb');
             restore_error_handler();
 
-            if (!is_resource($fh)) {
+            if (!\is_resource($fh)) {
                 return null;
             }
 
             set_error_handler(static function (int $errno, string $errstr) use ($filepath): bool {
-                error_log(sprintf('Warning: hash_update_stream error for %s: %s', $filepath, $errstr));
+                error_log(\sprintf('Warning: hash_update_stream error for %s: %s', $filepath, $errstr));
+
                 return true;
             });
-            $updated = hash_update_stream($hash, $fh);
+            $updated = \hash_update_stream($hash, $fh);
             restore_error_handler();
 
-            fclose($fh);
+            \fclose($fh);
 
-            if ($updated === false) {
+            if (false === $updated) {
                 return null;
             }
 
-            return hash_final($hash);
+            return \hash_final($hash);
         } catch (\Throwable $e) {
-            error_log(sprintf('Warning: computeXxh3Checksum exception for %s: %s', $filepath, $e->getMessage()));
+            error_log(\sprintf('Warning: computeXxh3Checksum exception for %s: %s', $filepath, $e->getMessage()));
+
             return null;
         }
     }
@@ -344,43 +320,43 @@ final class ProbeService
      */
     private function probeAudioFingerprint(string $filepath): ?array
     {
-        $which = shell_exec('command -v fpcalc 2>/dev/null');
-        if (!is_string($which) || trim($which) === '') {
+        $which = \shell_exec('command -v fpcalc 2>/dev/null');
+        if (!\is_string($which) || '' === \trim($which)) {
             return null;
         }
 
-        $command = sprintf('fpcalc -json %s 2>/dev/null', escapeshellarg($filepath));
-        $output = shell_exec($command);
+        $command = \sprintf('fpcalc -json %s 2>/dev/null', \escapeshellarg($filepath));
+        $output = \shell_exec($command);
 
-        if (!is_string($output) || trim($output) === '') {
+        if (!\is_string($output) || '' === \trim($output)) {
             return null;
         }
 
-        $decoded = json_decode($output, true);
-        if (!is_array($decoded) || !isset($decoded['fingerprint']) || !is_array($decoded['fingerprint'])) {
+        $decoded = \json_decode($output, true);
+        if (!\is_array($decoded) || !isset($decoded['fingerprint']) || !\is_array($decoded['fingerprint'])) {
             return null;
         }
 
         $values = [];
         foreach ($decoded['fingerprint'] as $value) {
-            if (!is_numeric($value)) {
+            if (!\is_numeric($value)) {
                 return null;
             }
 
             $values[] = (int) $value;
         }
 
-        if ($values === []) {
+        if ([] === $values) {
             return null;
         }
 
-        $fingerprintHash = hash('sha1', implode(',', $values));
+        $fingerprintHash = \hash('sha1', \implode(',', $values));
         $metadata = [
             'audio_fingerprint' => $values,
             'audio_fingerprint_hash' => $fingerprintHash,
         ];
 
-        if (isset($decoded['duration']) && is_numeric($decoded['duration'])) {
+        if (isset($decoded['duration']) && \is_numeric($decoded['duration'])) {
             $metadata['audio_fingerprint_duration'] = (float) $decoded['duration'];
         }
 
@@ -397,15 +373,15 @@ final class ProbeService
      */
     private function compareFingerprintSimilarity(array $a, array $b): float
     {
-        $len = min(count($a), count($b));
-        if ($len === 0) {
+        $len = \min(\count($a), \count($b));
+        if (0 === $len) {
             return 0.0;
         }
 
         $matches = 0;
-        for ($i = 0; $i < $len; $i++) {
+        for ($i = 0; $i < $len; ++$i) {
             if ($a[$i] === $b[$i]) {
-                $matches++;
+                ++$matches;
             }
         }
 

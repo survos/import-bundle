@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Service;
@@ -6,9 +7,6 @@ namespace Survos\ImportBundle\Service;
 use Doctrine\ORM\EntityManagerInterface;
 use Survos\ImportBundle\Entity\FetchRecord;
 use Survos\JsonlBundle\IO\JsonlWriter;
-
-use function is_scalar;
-use function json_decode;
 
 final class FetchRecordExporter
 {
@@ -29,16 +27,16 @@ final class FetchRecordExporter
         $seen = [];
 
         foreach ($this->entityManager->getRepository(FetchRecord::class)->forDataset($providerCode, $datasetKey, $kind, $recordType) as $record) {
-            $row = json_decode($record->payload, true, flags: JSON_THROW_ON_ERROR);
-            $token = isset($row['id']) && is_scalar($row['id']) ? (string) $row['id'] : null;
-            if ($token !== null && isset($seen[$token])) {
+            $row = \json_decode($record->payload, true, flags: JSON_THROW_ON_ERROR);
+            $token = isset($row['id']) && \is_scalar($row['id']) ? (string) $row['id'] : null;
+            if (null !== $token && isset($seen[$token])) {
                 continue;
             }
-            if ($token !== null) {
+            if (null !== $token) {
                 $seen[$token] = true;
             }
             $writer->write($row, $token);
-            $count++;
+            ++$count;
         }
 
         $writer->finish(markComplete: true);

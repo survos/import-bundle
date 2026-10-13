@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Event;
@@ -36,8 +37,8 @@ final class ImportConvertStartedEvent extends Event
  */
 final class ImportConvertRowEvent extends Event
 {
-    public const STATUS_OKAY      = 'okay';
-    public const STATUS_SKIP      = 'skip';
+    public const STATUS_OKAY = 'okay';
+    public const STATUS_SKIP = 'skip';
     public const STATUS_DUPLICATE = 'duplicate';
 
     /**

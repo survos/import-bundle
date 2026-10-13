@@ -1,14 +1,14 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Tests;
 
-use Survos\ImportBundle\Tests\Entity\Sample;
-use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Survos\ImportBundle\Service\LooseObjectMapper;
+use Survos\ImportBundle\Tests\Entity\Sample;
 use Symfony\Bridge\Doctrine\PropertyInfo\DoctrineExtractor;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 use Symfony\Component\TypeInfo\Type;
@@ -43,14 +43,14 @@ final class LooseObjectMapperTest extends TestCase
     private function sampleTypeMap(): array
     {
         return [
-            'id'        => Type::int(),
-            'tags'      => Type::array(),
-            'codes'     => Type::array(),
-            'rating'    => Type::float(),
-            'isActive'  => Type::bool(),
-            'createdAt' => Type::object(DateTimeImmutable::class),
-            'meta'      => Type::object('array'),
-            'notes'     => Type::string(),
+            'id' => Type::int(),
+            'tags' => Type::array(),
+            'codes' => Type::array(),
+            'rating' => Type::float(),
+            'isActive' => Type::bool(),
+            'createdAt' => Type::object(\DateTimeImmutable::class),
+            'meta' => Type::object('array'),
+            'notes' => Type::string(),
         ];
     }
 
@@ -66,8 +66,8 @@ final class LooseObjectMapperTest extends TestCase
         $entity = new Sample();
         $mapper->mapInto($data, $entity);
 
-        $this->assertSame(['a','b','c'], $entity->tags);
-        $this->assertSame(['x','y','z'], $entity->codes);
+        $this->assertSame(['a', 'b', 'c'], $entity->tags);
+        $this->assertSame(['x', 'y', 'z'], $entity->codes);
     }
 
     public function testBooleanCoercion(): void
@@ -108,22 +108,22 @@ final class LooseObjectMapperTest extends TestCase
 
         // ISO 8601
         $mapper->mapInto(['created_at' => '2024-02-03T04:05:06Z'], $entity);
-        $this->assertInstanceOf(DateTimeImmutable::class, $entity->createdAt);
+        $this->assertInstanceOf(\DateTimeImmutable::class, $entity->createdAt);
         $this->assertSame('2024-02-03T04:05:06+00:00', $entity->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('c'));
 
         // Date only (YYYY-MM-DD)
         $mapper->mapInto(['created_at' => '2024-12-31'], $entity);
-        $this->assertInstanceOf(DateTimeImmutable::class, $entity->createdAt);
+        $this->assertInstanceOf(\DateTimeImmutable::class, $entity->createdAt);
         $this->assertSame('2024-12-31T00:00:00+00:00', $entity->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('c'));
 
         // US m/d/yy (-> 20xx heuristic)
         $mapper->mapInto(['created_at' => '7/4/24'], $entity);
-        $this->assertInstanceOf(DateTimeImmutable::class, $entity->createdAt);
+        $this->assertInstanceOf(\DateTimeImmutable::class, $entity->createdAt);
         $this->assertSame('2024-07-04T00:00:00+00:00', $entity->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('c'));
 
         // Epoch seconds (midnight UTC for 2024-05-03)
         $ts = 1714694400; // 2024-05-03T00:00:00Z
-        $mapper->mapInto(['created_at' => (string)$ts], $entity);
+        $mapper->mapInto(['created_at' => (string) $ts], $entity);
         $this->assertSame('2024-05-03T00:00:00+00:00', $entity->createdAt->setTimezone(new \DateTimeZone('UTC'))->format('c'));
 
         // Epoch milliseconds
@@ -155,7 +155,7 @@ final class LooseObjectMapperTest extends TestCase
             'notes' => 'n/a',
             'rating' => 'null',
             'tags' => '',
-        ], $entity, context: ['null_literals' => ['null','n/a','']]);
+        ], $entity, context: ['null_literals' => ['null', 'n/a', '']]);
 
         $this->assertNull($entity->notes);
         $this->assertNull($entity->rating);

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\EventListener;
@@ -27,7 +28,7 @@ final class FetchPageCountUpdateListener
         }
 
         $id = $this->datasetId($event->page->datasetKey);
-        if ($id === null) {
+        if (null === $id) {
             return;
         }
 
@@ -49,10 +50,10 @@ final class FetchPageCountUpdateListener
             'status' => FetchPage::STATUS_FETCHED,
         ]);
 
-        if ($event->page->kind === FetchPage::KIND_LISTING) {
+        if (FetchPage::KIND_LISTING === $event->page->kind) {
             $entity->listingPageCount = $total;
             $entity->listingPagesFetched = $fetched;
-        } elseif ($event->page->kind === FetchPage::KIND_DETAIL) {
+        } elseif (FetchPage::KIND_DETAIL === $event->page->kind) {
             $entity->detailPageCount = $total;
             $entity->detailPagesFetched = $fetched;
         }
@@ -63,6 +64,7 @@ final class FetchPageCountUpdateListener
     private function datasetId(string $datasetKey): string|int|null
     {
         $parts = explode('/', $datasetKey, 2);
+
         return $parts[1] ?? null;
     }
 }

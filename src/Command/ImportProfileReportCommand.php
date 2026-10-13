@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Command;
@@ -8,31 +9,6 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
-
-use function array_map;
-use function array_slice;
-use function basename;
-use function count;
-use function dirname;
-use function file_get_contents;
-use function implode;
-use function in_array;
-use function is_array;
-use function is_file;
-use function is_float;
-use function is_numeric;
-use function json_decode;
-use function json_encode;
-use function preg_match;
-use function preg_replace;
-use function restore_error_handler;
-use function set_error_handler;
-use function sprintf;
-use function str_ends_with;
-use function strtolower;
-use function substr;
-use function trim;
-use function usort;
 
 #[AsCommand(
     'import:profile:report',
@@ -59,26 +35,30 @@ final class ImportProfileReportCommand
 
         $profilePath = $profile;
 
-        if ($profilePath === null || !is_file($profilePath)) {
-            $io->error(sprintf('Profile file not found: %s', $profilePath ?? '(null)'));
+        if (null === $profilePath || !\is_file($profilePath)) {
+            $io->error(\sprintf('Profile file not found: %s', $profilePath ?? '(null)'));
+
             return Command::FAILURE;
         }
 
-        $raw = file_get_contents($profilePath);
-        if ($raw === false) {
-            $io->error(sprintf('Unable to read profile file: %s', $profilePath));
+        $raw = \file_get_contents($profilePath);
+        if (false === $raw) {
+            $io->error(\sprintf('Unable to read profile file: %s', $profilePath));
+
             return Command::FAILURE;
         }
 
-        $json = json_decode($raw, true);
-        if (!is_array($json)) {
+        $json = \json_decode($raw, true);
+        if (!\is_array($json)) {
             $io->error('Profile JSON is invalid or not an object.');
+
             return Command::FAILURE;
         }
 
         $fields = $json['fields'] ?? [];
-        if (!is_array($fields)) {
+        if (!\is_array($fields)) {
             $io->error('Profile does not contain a "fields" object.');
+
             return Command::FAILURE;
         }
 
@@ -89,37 +69,38 @@ final class ImportProfileReportCommand
             ['Input' => (string) ($json['input'] ?? '')],
             ['Output' => (string) ($json['output'] ?? '')],
             ['Record count' => (string) ($json['recordCount'] ?? '')],
-            ['Unique fields' => implode(', ', (array) ($json['uniqueFields'] ?? []))],
-            ['Tags' => implode(', ', (array) ($json['tags'] ?? []))],
+            ['Unique fields' => \implode(', ', (array) ($json['uniqueFields'] ?? []))],
+            ['Tags' => \implode(', ', (array) ($json['tags'] ?? []))],
         );
 
         if ($showTransforms) {
             $io->section('Transforms');
-            $io->writeln(json_encode($json['transforms'] ?? new \stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $io->writeln(\json_encode($json['transforms'] ?? new \stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
 
         $rows = [];
         foreach ($fields as $name => $s) {
-            if (!is_array($s)) {
+            if (!\is_array($s)) {
                 continue;
             }
 
-            if ($match !== null && $match !== '') {
+            if (null !== $match && '' !== $match) {
                 try {
                     $ok = $this->safePregMatch($match, (string) $name);
                 } catch (\RuntimeException $e) {
                     $io->error($e->getMessage());
+
                     return Command::FAILURE;
                 }
 
-                if ($ok !== 1) {
+                if (1 !== $ok) {
                     continue;
                 }
             }
 
             $row = $this->rowForField((string) $name, $s);
 
-            if ($only !== null && $only !== '') {
+            if (null !== $only && '' !== $only) {
                 if (!$this->passesOnlyFilter($only, $row, $s, (array) ($json['uniqueFields'] ?? []))) {
                     continue;
                 }
@@ -131,13 +112,13 @@ final class ImportProfileReportCommand
         $rows = $this->sortRows($rows, $sort);
 
         if ($limit > 0) {
-            $rows = array_slice($rows, 0, $limit);
+            $rows = \array_slice($rows, 0, $limit);
         }
 
-        $io->section(sprintf('Fields (%d)', count($rows)));
+        $io->section(\sprintf('Fields (%d)', \count($rows)));
         $io->table(
             ['Field', 'Types', 'Hint', 'Nulls', 'Distinct', 'Len(avg/min/max)', 'Flags', 'Split'],
-            array_map(static function (array $r): array {
+            \array_map(static function (array $r): array {
                 return [
                     $r['name'],
                     $r['types'],
@@ -160,23 +141,20 @@ final class ImportProfileReportCommand
     {
         $warning = null;
 
-        set_error_handler(static function (int $severity, string $message) use (&$warning): bool {
+        \set_error_handler(static function (int $severity, string $message) use (&$warning): bool {
             $warning = $message;
+
             return true;
         });
 
         try {
-            $result = preg_match($pattern, $subject);
+            $result = \preg_match($pattern, $subject);
         } finally {
-            restore_error_handler();
+            \restore_error_handler();
         }
 
-        if ($result === false) {
-            throw new \RuntimeException(sprintf(
-                'Invalid --match regex %s (%s).',
-                $pattern,
-                $warning ?? 'preg_match failed'
-            ));
+        if (false === $result) {
+            throw new \RuntimeException(\sprintf('Invalid --match regex %s (%s).', $pattern, $warning ?? 'preg_match failed'));
         }
 
         return $result;
@@ -184,55 +162,56 @@ final class ImportProfileReportCommand
 
     private function profilePathFromJsonl(string $jsonlPath): string
     {
-        $dir = dirname($jsonlPath);
-        $filename = basename($jsonlPath);
+        $dir = \dirname($jsonlPath);
+        $filename = \basename($jsonlPath);
 
-        if (str_ends_with($filename, '.gz')) {
-            $filename = substr($filename, 0, -3);
+        if (\str_ends_with($filename, '.gz')) {
+            $filename = \substr($filename, 0, -3);
         }
 
-        $filename = preg_replace('/\.(jsonl|json)$/i', '', $filename, 1);
+        $filename = \preg_replace('/\.(jsonl|json)$/i', '', $filename, 1);
 
-        return sprintf('%s/%s.profile.json', $dir, $filename);
+        return \sprintf('%s/%s.profile.json', $dir, $filename);
     }
 
     /**
      * @param array<string,mixed> $s
+     *
      * @return array{name:string,types:string,storageHint:string,nulls:string,distinct:string,len:string,flags:string,split:string,_sort:array<string,float|int|string>}
      */
     private function rowForField(string $name, array $s): array
     {
         $types = $s['types'] ?? [];
-        $typesStr = is_array($types) ? implode(',', $types) : (string) $types;
+        $typesStr = \is_array($types) ? \implode(',', $types) : (string) $types;
 
         $nulls = (string) ($s['nulls'] ?? '');
         $distinct = (string) ($s['distinct'] ?? '');
 
         $len = $s['stringLengths'] ?? [];
-        $avg = is_array($len) ? ($len['avg'] ?? null) : null;
-        $min = is_array($len) ? ($len['min'] ?? null) : null;
-        $max = is_array($len) ? ($len['max'] ?? null) : null;
+        $avg = \is_array($len) ? ($len['avg'] ?? null) : null;
+        $min = \is_array($len) ? ($len['min'] ?? null) : null;
+        $max = \is_array($len) ? ($len['max'] ?? null) : null;
 
-        $lenStr = sprintf(
+        $lenStr = \sprintf(
             '%s/%s/%s',
-            $avg === null ? '' : (is_float($avg) ? sprintf('%.1f', $avg) : (string) $avg),
-            $min === null ? '' : (string) $min,
-            $max === null ? '' : (string) $max
+            null === $avg ? '' : (\is_float($avg) ? \sprintf('%.1f', $avg) : (string) $avg),
+            null === $min ? '' : (string) $min,
+            null === $max ? '' : (string) $max
         );
 
         $flags = [];
-        foreach (['booleanLike','urlLike','jsonLike','imageLike','naturalLanguageLike'] as $k) {
+        foreach (['booleanLike', 'urlLike', 'jsonLike', 'imageLike', 'naturalLanguageLike'] as $k) {
             if (!empty($s[$k])) {
                 $flags[] = $k;
             }
         }
         if (!empty($s['localeGuess'])) {
-            $flags[] = 'locale:' . $s['localeGuess'];
+            $flags[] = 'locale:'.$s['localeGuess'];
         }
 
         $split = '';
-        if (isset($s['splitCandidate']) && is_array($s['splitCandidate']) && !empty($s['splitCandidate']['enabled'])) {
-            $split = sprintf(
+        if (isset($s['splitCandidate']) && \is_array($s['splitCandidate']) && !empty($s['splitCandidate']['enabled'])) {
+            $split = \sprintf(
                 '%s (r=%s c=%s)',
                 (string) ($s['splitCandidate']['delimiter'] ?? ''),
                 (string) ($s['splitCandidate']['ratio'] ?? ''),
@@ -249,7 +228,7 @@ final class ImportProfileReportCommand
             'nulls' => $nulls,
             'distinct' => $distinct,
             'len' => $lenStr,
-            'flags' => implode(' ', $flags),
+            'flags' => \implode(' ', $flags),
             'split' => $split,
 
             // sort keys
@@ -257,14 +236,15 @@ final class ImportProfileReportCommand
                 'name' => $name,
                 'distinct' => (int) ($s['distinct'] ?? 0),
                 'nulls' => (int) ($s['nulls'] ?? 0),
-                'avgLen' => is_numeric($avg) ? (float) $avg : -1.0,
-                'maxLen' => is_numeric($max) ? (int) $max : -1,
+                'avgLen' => \is_numeric($avg) ? (float) $avg : -1.0,
+                'maxLen' => \is_numeric($max) ? (int) $max : -1,
             ],
         ];
     }
 
     /**
      * @param array<int,array{_sort:array<string,float|int|string>}> $rows
+     *
      * @return array<int,array{_sort:array<string,float|int|string>}>
      */
     private function sortRows(array $rows, string $sort): array
@@ -277,13 +257,13 @@ final class ImportProfileReportCommand
             default => 'name',
         };
 
-        usort($rows, static function (array $a, array $b) use ($key): int {
+        \usort($rows, static function (array $a, array $b) use ($key): int {
             $av = $a['_sort'][$key] ?? null;
             $bv = $b['_sort'][$key] ?? null;
 
             // Desc for numeric sorts
-            if ($key !== 'name') {
-                return ($bv <=> $av);
+            if ('name' !== $key) {
+                return $bv <=> $av;
             }
 
             return (string) $av <=> (string) $bv;
@@ -295,19 +275,19 @@ final class ImportProfileReportCommand
     /**
      * @param array<string,mixed> $row
      * @param array<string,mixed> $stats
-     * @param string[] $uniqueFields
+     * @param string[]            $uniqueFields
      */
     private function passesOnlyFilter(string $only, array $row, array $stats, array $uniqueFields): bool
     {
-        $only = strtolower(trim($only));
+        $only = \strtolower(\trim($only));
 
         return match ($only) {
-            'split' => isset($stats['splitCandidate']) && is_array($stats['splitCandidate']) && !empty($stats['splitCandidate']['enabled']),
-            'nl'    => !empty($stats['naturalLanguageLike']),
+            'split' => isset($stats['splitCandidate']) && \is_array($stats['splitCandidate']) && !empty($stats['splitCandidate']['enabled']),
+            'nl' => !empty($stats['naturalLanguageLike']),
             'image' => !empty($stats['imageLike']),
-            'url'   => !empty($stats['urlLike']),
-            'json'  => !empty($stats['jsonLike']),
-            'pk'    => in_array($row['name'], $uniqueFields, true),
+            'url' => !empty($stats['urlLike']),
+            'json' => !empty($stats['jsonLike']),
+            'pk' => \in_array($row['name'], $uniqueFields, true),
             default => true,
         };
     }

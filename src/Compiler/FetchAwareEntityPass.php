@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\ImportBundle\Compiler;
@@ -17,9 +18,9 @@ final class FetchAwareEntityPass implements CompilerPassInterface
             ? (array) $container->getParameter('survos_import.fetch_entity_roots')
             : [];
 
-        if ($roots === []) {
+        if ([] === $roots) {
             $roots = [
-                (string) $container->getParameter('kernel.project_dir') . '/src/Entity' => 'App',
+                (string) $container->getParameter('kernel.project_dir').'/src/Entity' => 'App',
             ];
         }
 
@@ -47,16 +48,11 @@ final class FetchAwareEntityPass implements CompilerPassInterface
                 }
 
                 if (!$this->classUsesTraitRecursive($rc, FetchPagesTrait::class)) {
-                    throw new \LogicException(sprintf(
-                        'Class %s implements %s but does not use %s.',
-                        $fqcn,
-                        FetchPagesInterface::class,
-                        FetchPagesTrait::class,
-                    ));
+                    throw new \LogicException(sprintf('Class %s implements %s but does not use %s.', $fqcn, FetchPagesInterface::class, FetchPagesTrait::class));
                 }
 
                 $providerCode = $fqcn::getFetchProviderCode();
-                if ($providerCode === '') {
+                if ('' === $providerCode) {
                     throw new \LogicException(sprintf('Class %s returned an empty fetch provider code.', $fqcn));
                 }
 
@@ -82,7 +78,7 @@ final class FetchAwareEntityPass implements CompilerPassInterface
 
         /** @var \SplFileInfo $f */
         foreach ($it as $f) {
-            if ($f->isFile() && $f->getExtension() === 'php') {
+            if ($f->isFile() && 'php' === $f->getExtension()) {
                 yield $f->getPathname();
             }
         }
@@ -95,7 +91,7 @@ final class FetchAwareEntityPass implements CompilerPassInterface
             return null;
         }
 
-        return $prefix . '\\' . str_replace('/', '\\', substr($rel, 0, -4));
+        return $prefix.'\\'.str_replace('/', '\\', substr($rel, 0, -4));
     }
 
     private function classUsesTraitRecursive(\ReflectionClass $rc, string $traitFqcn): bool
