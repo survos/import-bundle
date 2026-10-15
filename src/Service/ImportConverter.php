@@ -205,7 +205,8 @@ final class ImportConverter
                     $baseTags,
                     $limit,
                     $zipPath,
-                    $rootKey
+                    $rootKey,
+                    $this->currentStage,
                 )
             );
         }
@@ -419,7 +420,8 @@ final class ImportConverter
                     $dispatchTags,
                     $limit,
                     $zipPath,
-                    $rootKey
+                    $rootKey,
+                    $this->currentStage,
                 )
             );
         }
