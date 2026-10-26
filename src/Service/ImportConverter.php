@@ -450,6 +450,10 @@ final class ImportConverter
 
     private function estimateSourceRows(string $sourceInput, string $input, string $sourceExt): ?int
     {
+        // Archive members are streamed; Phar/gzopen size probes cannot represent large tar members.
+        if (\Survos\JsonlBundle\IO\ArchiveJsonl::isPath($sourceInput)) {
+            return null;
+        }
         $rows = $this->readSidecarRowCount($sourceInput, $sourceExt);
         if (null !== $rows) {
             return $rows;
