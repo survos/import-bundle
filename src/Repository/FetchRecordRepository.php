@@ -38,8 +38,8 @@ class FetchRecordRepository extends ServiceEntityRepository
             ->setParameter('dataset', $datasetKey)
             ->setParameter('kind', $kind)
             ->setParameter('status', FetchPage::STATUS_FETCHED)
-            ->orderBy('p.pageNumber', 'ASC')
-            ->addOrderBy('r.rowNumber', 'ASC');
+            ->orderBy('p.pageNumber')
+            ->addOrderBy('r.rowNumber');
 
         if (null !== $recordType) {
             $qb
