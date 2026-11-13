@@ -55,7 +55,6 @@ class SurvosImportBundle extends AbstractSurvosBundle
                             'type' => 'attribute',
                             'dir' => \dirname(__DIR__).'/src/Entity',
                             'prefix' => 'Survos\\ImportBundle\\Entity',
-                            'alias' => 'Import',
                         ],
                     ],
                 ],
