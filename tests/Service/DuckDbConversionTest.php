@@ -128,6 +128,6 @@ final class DuckDbConversionTest extends TestCase
         self::assertSame(1025, (int) $db->query('SELECT count(*) FROM objects')->fetchColumn());
         self::assertSame(['id' => 1024], (new RecordReader($db, 'objects'))->get('1024'));
         self::assertSame(['objects' => 1025, 'groups' => 1], (new RecordReader($db))->metadata()['tables']);
-        self::assertEquals([['members' => [1, 2]]],iterator_to_array((new RecordReader($db,'groups'))->rows(),false));
+        self::assertEquals([['members' => [1, 2]]], iterator_to_array((new RecordReader($db, 'groups'))->rows(), false));
     }
 }
