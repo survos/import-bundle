@@ -42,7 +42,7 @@ final class ImportConverter
     ) {
     }
 
-    #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL to JSONL/CSV and generate a profile')]
+    #[AsCommand('import:convert', 'Convert CSV/JSON/JSONL/DuckDB to JSONL/CSV/DuckDB')]
     public function convert(
         SymfonyStyle $io,
 
@@ -98,6 +98,15 @@ final class ImportConverter
 
         #[Option('During --stage=enrich, fold claims from this vault claims.jsonl (canonical one-row-per-claim, from `claims:fetch`/`claims:export`). The caller must supply its path.')]
         ?string $claimsFile = null,
+
+        #[Option('DuckDB input table (default: records)')]
+        ?string $table = null,
+
+        #[Option('Read object records from this DuckDB JSON/VARIANT column instead of whole table rows')]
+        ?string $jsonColumn = null,
+
+        #[Option('DuckDB input column to order by for deterministic iteration')]
+        ?string $orderBy = null,
     ): int {
         $io->title('Import / Convert');
 
@@ -132,14 +141,29 @@ final class ImportConverter
             return Command::FAILURE;
         }
 
-        $input = \Survos\JsonlBundle\Util\Jsonl::resolvePath($input);
-        if (!\is_file($input) && !\is_dir($input)) {
+        $remoteDuckDb = str_starts_with($input, 's3://') && str_ends_with($input, '.duckdb');
+        $duckOutput = null !== $output && str_ends_with($output, '.duckdb');
+        if ($duckOutput || str_ends_with($input, '.duckdb')) {
+            \Survos\ImportBundle\IO\DuckDbSupport::requireAvailable();
+        }
+        if ($duckOutput && ($csv || $profile || $profileOnly || $legacyProfile || null !== $dataset || null !== $tagsOption)) {
+            throw new \InvalidArgumentException('DuckDB output is a standalone record export; omit dataset/tags and CSV/profile options. Dataset normalization can read DuckDB and still emits JSONL.');
+        }
+        if ($duckOutput && (str_contains($output, '://') || $output === $input || (is_file($output) && realpath($output) === realpath($input)))) {
+            throw new \InvalidArgumentException('Write DuckDB to a separate local snapshot, then publish the closed file.');
+        }
+        if (!$remoteDuckDb) {
+            $input = \Survos\JsonlBundle\Util\Jsonl::resolvePath($input);
+        } elseif (null === $output) {
+            throw new \InvalidArgumentException('Remote DuckDB input requires an explicit local output.');
+        }
+        if (!$remoteDuckDb && !\is_file($input) && !\is_dir($input)) {
             $io->error(\sprintf('Input file or directory "%s" does not exist.', $input));
 
             return Command::FAILURE;
         }
 
-        if (\is_dir($input)) {
+        if (!$remoteDuckDb && \is_dir($input)) {
             $sourceInput = $input;
             $sourceExt = 'json_dir';
         } else {
@@ -156,7 +180,7 @@ final class ImportConverter
 
         // Never overwrite the source during a bare conversion (e.g. file.jsonl → file.jsonl);
         // resetOutput() would unlink the input before we read it.
-        if (!$profileOnly && \is_file($outputPath) && \is_file($sourceInput)
+        if (!$profileOnly && !$remoteDuckDb && \is_file($outputPath) && \is_file($sourceInput)
             && \realpath($outputPath) === \realpath($sourceInput)) {
             if (null !== $output) {
                 $io->error('Input and output must be different files.');
@@ -231,15 +255,20 @@ final class ImportConverter
                     $dataset,
                     $rootKey,
                     $applyProfilePath,
-                    $dumpRecord
+                    $dumpRecord,
+                    $table,
+                    $jsonColumn,
+                    $orderBy
                 );
             }
 
             // Keep existing behavior for now; we can switch to JsonlWriterOptions(ensureDir:true) later.
-            $this->resetOutput($outputPath, $sourceInput);
+            if (!$duckOutput) {
+                $this->resetOutput($outputPath, $sourceInput);
+            }
             $this->ensureDir($outputPath);
 
-            $io->section(\sprintf('Converting %s → %s', $sourceExt, $csv ? 'CSV' : 'JSONL'));
+            $io->section(\sprintf('Converting %s → %s', $sourceExt, $duckOutput ? 'DuckDB' : ($csv ? 'CSV' : 'JSONL')));
             // Show the source + destination up front (repeated in the success footer) so a run is
             // self-documenting — you can see exactly which file fed which without scrolling.
             $io->definitionList(
@@ -247,7 +276,9 @@ final class ImportConverter
                 ['to' => $outputPath],
             );
 
-            if ($csv) {
+            if ($duckOutput) {
+                $writer = new \Survos\DuckDbBundle\RecordWriter($outputPath);
+            } elseif ($csv) {
                 $writer = CsvWriter::open($outputPath);
 
                 // For CSV input, preserve original header order by writing headers from source
@@ -258,7 +289,7 @@ final class ImportConverter
                 $writer = JsonlWriter::open($outputPath);
             }
 
-            $ctx = (new ProviderContext(io: $io, rootKey: $rootKey))
+            $ctx = (new ProviderContext(io: $io, rootKey: $rootKey, table: $table, jsonColumn: $jsonColumn, orderBy: $orderBy))
                 ->withOnHeader(function (string $normalized, string $original): void {
                     $this->fieldOriginalNames[$normalized] = $original;
                 });
@@ -296,7 +327,7 @@ final class ImportConverter
                 // AiEnrichRowListener (shared-claims projection) never fires.
                 if ('enrich' === $stage) {
                     $row = $this->mergeClaims($row, $claimRows);
-                } else {
+                } elseif (!($duckOutput && 'raw' === $stage)) {
                     $row = $this->rowNormalizer->normalizeRow($row);
                 }
 
@@ -330,7 +361,11 @@ final class ImportConverter
 
             $convertedCount = $count;
 
-            $writer->close();
+            if ($duckOutput) {
+                $writer->finish(['input' => $input, 'table' => $table, 'limit' => $limit, 'stage' => $stage]);
+            } else {
+                $writer->close();
+            }
             $io->definitionList(
                 ['from' => $sourceInput],
                 ['to' => $outputPath],
@@ -450,6 +485,9 @@ final class ImportConverter
 
     private function estimateSourceRows(string $sourceInput, string $input, string $sourceExt): ?int
     {
+        if (str_starts_with($sourceInput, 's3://')) {
+            return null;
+        }
         // Archive members are streamed; Phar/gzopen size probes cannot represent large tar members.
         if (\Survos\JsonlBundle\IO\ArchiveJsonl::isPath($sourceInput)) {
             return null;
@@ -752,8 +790,11 @@ final class ImportConverter
         ?string $rootKey,
         ?string $applyProfilePath,
         int $dumpRecord,
+        ?string $table = null,
+        ?string $jsonColumn = null,
+        ?string $orderBy = null,
     ): int {
-        $ctx = (new ProviderContext(io: $io, rootKey: $rootKey))
+        $ctx = (new ProviderContext(io: $io, rootKey: $rootKey, table: $table, jsonColumn: $jsonColumn, orderBy: $orderBy))
             ->withOnHeader(function (string $normalized, string $original): void {
                 $this->fieldOriginalNames[$normalized] = $original;
             });

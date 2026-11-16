@@ -41,7 +41,8 @@
     "suggest": {
         "league/csv": "Required for CSV input, CSV output, and CSV profiling commands.",
         "halaxa/json-machine": "Stream large JSON files without loading them into memory.",
-        "phpoffice/phpspreadsheet": "Required for XLSX/XLS input."
+        "phpoffice/phpspreadsheet": "Required for XLSX/XLS input.",
+        "survos/duckdb-bundle": "DuckDB input/output with native ext-pdo_duckdb and DuckDB 2.0 or newer."
     },
     "autoload": {
         "psr-4": {

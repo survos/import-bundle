@@ -12,6 +12,9 @@ final class ProviderContext
         public readonly ?SymfonyStyle $io = null,
         public readonly ?string $rootKey = null,
         public readonly ?\Closure $onHeader = null,
+        public readonly ?string $table = null,
+        public readonly ?string $jsonColumn = null,
+        public readonly ?string $orderBy = null,
     ) {
     }
 
@@ -21,6 +24,9 @@ final class ProviderContext
             io: $this->io,
             rootKey: $this->rootKey,
             onHeader: $onHeader ? \Closure::fromCallable($onHeader) : null,
+            table: $this->table,
+            jsonColumn: $this->jsonColumn,
+            orderBy: $this->orderBy,
         );
     }
 }

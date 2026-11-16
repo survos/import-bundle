@@ -79,6 +79,7 @@ class SurvosImportBundle extends AbstractSurvosBundle
         $builder->registerForAutoconfiguration(RowProviderInterface::class)
             ->addTag('survos.import.row_provider');
 
+        $builder->autowire(Service\Provider\DuckDbRowProvider::class)->setAutoconfigured(true);
         $builder->autowire(Service\Provider\CsvRowProvider::class)->setAutoconfigured(true);
         $builder->autowire(Service\Provider\JsonRowProvider::class)->setAutoconfigured(true);
         $builder->autowire(Service\Provider\JsonlRowProvider::class)->setAutoconfigured(true);
