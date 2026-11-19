@@ -363,6 +363,9 @@ final class ImportConverter
 
             if ($duckOutput) {
                 $writer->finish(['input' => $input, 'table' => $table, 'limit' => $limit, 'stage' => $stage]);
+            } elseif ($writer instanceof JsonlWriter) {
+                // A run that read its whole input produced a complete file; one stopped by --limit did not.
+                $writer->finish(markComplete: !$limitReached);
             } else {
                 $writer->close();
             }
